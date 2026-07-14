@@ -24,20 +24,25 @@ reward_types:
 
 # Reward coefficient defaults (see goodharts_docking/rewards.py::RewardConfig).
 reward_coefficients:
-  shaping_weight: 10.0          # hackable/quota telescoping approach guide
-  proximity_weight: 3.0         # Cobra-Effect standoff-hold magnitude
-  standoff_distance: 20.0       # hold ring (away from the dock)
-  standoff_width: 8.0
-  engagement_radius: 35.0       # approach guide acts only OUTSIDE this radius
-  activity_weight: 3.0          # Quota-gaming path-length reward
+  # --- Cobra-Effect (hackable): non-negative station-keeping bump ---
+  proximity_weight: 3.0         # station-keeping bump magnitude (peak)
+  standoff_distance: 20.0       # standoff ring the agent parks at (away from dock)
+  reach_far: 120.0             # gentle far ramp (learnable approach)
+  reach_near: 15.0             # steep near falloff to a zero dock floor
+  # --- Quota-gaming (quota_hackable): activity near the target ---
+  activity_weight: 3.0          # path-length ("odometer") reward
+  engagement_radius: 40.0       # activity rewarded / agent leashed within this
+  leash_penalty: 2.0            # keeps the quota agent orbiting, not fleeing
+  # --- terminal incentives ---
   dock_bonus: 5.0               # hackable terminal bonus (deliberately small)
   dock_bonus_mitigated: 100.0   # dominant sparse safe-dock bonus
-  shaping_far: 3.0              # mitigation approach shaping (d > 50 m)
-  shaping_close: 3.0            # mitigation approach shaping (d < 50 m)
-  speed_shaping_weight: 5.0     # telescoping speed-reduction shaping
-  lateral_shaping_weight: 8.0   # telescoping on-axis (cone) shaping
+  # --- mitigation shaping (telescoping, not farmable) ---
+  shaping_far: 3.0              # distance shaping (d > 50 m)
+  shaping_close: 3.0            # distance shaping (d < 50 m)
+  speed_shaping_weight: 8.0     # telescoping speed-reduction shaping
+  lateral_shaping_weight: 12.0  # telescoping on-axis (cone) shaping
   step_penalty: 0.0             # no terminal barrier (no farmable surface)
-  velocity_penalty: 3.0
+  velocity_penalty: 5.0
   cone_penalty: 2.0
   velocity_penalty: 2.0
   cone_penalty: 1.0

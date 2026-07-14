@@ -88,9 +88,11 @@ class RewardConfig:
     # "give up" and trigger the divergence terminal to escape it).
     reach_far: float = 120.0
     reach_near: float = 15.0
-    # Quota activity is only rewarded inside this radius, so the quota agent
-    # orbits near the target instead of fleeing outward to accrue path length.
+    # Quota activity is only rewarded inside this radius, and a "leash" penalty
+    # for straying beyond it keeps the quota agent orbiting near the target
+    # instead of fleeing outward to accrue path length.
     engagement_radius: float = 40.0
+    leash_penalty: float = 2.0
 
     # --- Soviet-quota exploit surface (activity / path-length reward)
     activity_weight: float = 3.0
@@ -244,16 +246,17 @@ class HackableReward(RewardFunction):
 class QuotaHackableReward(RewardFunction):
     """Soviet quota gaming: reward measured *activity*, not achievement.
 
-    ``r = activity_weight * path_length_this_step      # "tonnage" quota
-          + shaping_weight * (prev_d - d)
+    ``r = standoff_bump(d)                              # stay engaged near target
+          + activity_weight * thrust_magnitude          # "activity" quota (busywork)
           - fuel_weight * fuel_used
           + dock_bonus (if docked)``
 
-    Paying per metre travelled rewards *motion*.  The agent maximises the proxy
-    by flying long, meandering paths (or orbiting the target) rather than
-    docking -- the RL analogue of a factory maximising output tonnage by
-    producing a few needlessly heavy items, or unit-count by producing many
-    useless small ones.
+    Paying for measured activity -- here control effort / manoeuvres executed --
+    rewards *doing things*, not *achieving the goal*. The agent hits its activity
+    quota with perpetual make-work manoeuvres at the standoff, burning propellant
+    and never settling into the slow, stable approach a dock requires -- the RL
+    analogue of a plant maximising output tonnage or unit count with useless
+    goods.
     """
 
     family = "hackable"
@@ -261,15 +264,14 @@ class QuotaHackableReward(RewardFunction):
     def compute(self, state, action, info) -> float:
         cfg = self.cfg
         d = info["distance_to_target"]
-        # Quota: reward measured ACTIVITY (path length) but only while engaged
-        # near the target (so the agent orbits rather than fleeing outward to
-        # rack up mileage). The non-negative station-keeping bump guides the
-        # approach and keeps it near the ring; inside the engagement radius the
-        # activity reward makes it dart and orbit at speed -- never slowing to the
-        # speed a dock requires.
-        r = self._standoff_bump(d)                                  # approach + engage
-        if d < cfg.engagement_radius:
-            r += cfg.activity_weight * info["distance_travelled_this_step"]
+        # Quota: reward measured ACTIVITY -- here control effort (thrust /
+        # manoeuvres executed) -- while the station-keeping bump keeps the agent
+        # near the target. Maximised by constant busywork: the agent burns
+        # propellant on perpetual manoeuvres at the standoff, never settling into
+        # the slow, stable approach a dock requires. This is the RL analogue of a
+        # plant that hits its activity quota with useless make-work output.
+        r = self._standoff_bump(d)                                  # stay engaged
+        r += cfg.activity_weight * info["thrust_magnitude"]          # busywork
         r += self._fuel_term(info, cfg.fuel_weight)
         if info["docked"]:
             r += cfg.dock_bonus
