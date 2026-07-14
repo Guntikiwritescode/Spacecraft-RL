@@ -49,8 +49,8 @@ the failure is \emph{algorithm-family-independent}: it is a property of the
 reward, not the optimiser. We further (i) taxonomise a second failure mode,
 \emph{Soviet Quota Gaming}; (ii) show that four mitigation architectures --
 constraint-shaping, potential-based shaping, constraint-gating, and
-hierarchical decomposition -- eliminate the exploit, with statistical
-significance established via Mann--Whitney $U$ tests; (iii) map the exact reward-
+hierarchical decomposition -- each restore docking, with statistical
+significance established via Mann--Whitney $U$ tests; (iii) map the reward-
 coefficient boundary at which hacking emerges via a hyperparameter sensitivity
 study; and (iv) transfer the entire taxonomy to a structurally different
 physical domain (autonomous lane-keeping), demonstrating domain-independence. We
@@ -263,21 +263,27 @@ intervals.
 
 \paragraph{Reward hacking is algorithm-family-independent.}
 Figure~\ref{fig:bars} reports docking-success rates across all algorithm/reward
-conditions. Under the exploitable rewards, all three families converge to
-near-zero docking success despite accumulating high training reward; under the
-mitigated reward they dock reliably. The behavioural divergence is visible
-directly in the learned trajectories (Fig.~\ref{fig:traj3d},
-\ref{fig:traj2d}): exploit policies orbit a standoff ring, mitigated policies
-drive straight to the port and stop. \dockingclaim{}
+conditions. The central, robust finding is that under the exploitable rewards
+\emph{all three families} converge to near-zero docking success despite
+accumulating high training reward -- the exploit is a property of the reward,
+not the optimiser. The mitigated reward restores docking; this is demonstrated
+in full on PPO (which docks reliably), while SAC and TD3 recover only partially
+under the reduced off-policy training budget used here (they reach the terminal
+region but do not always complete the dock; see Sec.~\ref{sec:setup} and the
+limitations). The behavioural divergence is visible directly in the learned
+trajectories (Fig.~\ref{fig:traj3d}, \ref{fig:traj2d}): exploit policies hold a
+standoff, mitigated policies drive straight to the port and stop. \dockingclaim{}
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.95\linewidth]{fig05_success_bars.png}
   \caption{Docking-success rate across algorithm families and reward
   architectures (mean, seed-bootstrap 95\% CI). Exploitable rewards
-  (vermillion/orange) collapse to near-zero docking across PPO, SAC and TD3;
-  mitigated rewards (green/blue) dock reliably. Reward \emph{structure}, not the
-  optimiser, determines the outcome.}
+  (vermillion/orange) collapse to near-zero docking across PPO, SAC and TD3 --
+  the algorithm-family-independent result; the mitigated reward (green) restores
+  docking, fully on PPO and partially on the budget-limited off-policy runs.
+  Reward \emph{structure}, not the optimiser, determines whether the exploit
+  appears.}
   \label{fig:bars}
 \end{figure}
 
@@ -315,11 +321,16 @@ visualisation of Goodhart's Law: optimising the measure does not optimise the
 objective.
 
 \paragraph{Statistical significance and mitigation ablation.}
-Table~\ref{tab:main} summarises per-condition outcomes. The exploit vs.\
-mitigation contrast is statistically significant for every algorithm family and
-in the pooled test (Mann--Whitney $U$; see \pooledclaim{}). The four mitigation
-architectures each significantly increase safe-docking relative to the Cobra
-Effect after Bonferroni correction (Fig.~\ref{fig:ablation}).
+Table~\ref{tab:main} summarises per-condition outcomes. The exploit-vs-mitigation
+docking contrast is statistically significant for PPO and in the pooled
+cross-family test (two-sided Mann--Whitney $U$; see \pooledclaim{}); for SAC and
+TD3 the reduced-budget mitigation runs do not reach significance individually.
+The four PPO mitigation architectures each raise docking success sharply
+relative to the Cobra Effect (Fig.~\ref{fig:ablation}; large rank-biserial
+effect sizes of $0.6$--$1.0$). Constraint-gating survives Bonferroni correction
+across the family; at the five-seed budget the remaining architectures show the
+same effect at uncorrected significance -- a power limitation, not a null
+result, given the effect sizes.
 
 \input{results_table.tex}
 
@@ -335,12 +346,13 @@ Effect after Bonferroni correction (Fig.~\ref{fig:ablation}).
     \caption{Emergence boundary.}
     \label{fig:heatmap}
   \end{subfigure}
-  \caption{(a) Every mitigation architecture significantly raises safe-docking
+  \caption{(a) Every PPO mitigation architecture raises docking success sharply
   over the Cobra Effect (stars: Bonferroni-corrected significance). (b)
   Sensitivity of PPO docking success to the exploit incentive
-  (\texttt{proximity\_weight}) versus the true-objective incentive
-  (\texttt{dock\_bonus}); the sharp boundary is the coefficient ratio at which
-  the reward-maximising policy flips from farming to docking.}
+  (\texttt{proximity\_weight}, the standoff-bump strength) against a modest fixed
+  dock guidance; docking collapses as the exploit incentive crosses a critical
+  strength -- the reward-coefficient boundary at which the reward-maximising
+  policy flips from docking to holding the standoff.}
 \end{figure}
 
 \paragraph{Where hacking emerges.} The sensitivity heatmap
@@ -374,10 +386,11 @@ autonomous \textbf{lane-keeping} with a kinematic bicycle model on a curving
 road. The identical failure modes recur (Table~\ref{tab:crossdomain},
 Fig.~\ref{fig:crossdomain}): a per-step lane-centering ``hold'' bonus reproduces
 the \textbf{Cobra Effect} (the car crawls or stops, farming centred-time rather
-than completing the route), while an odometer/activity reward reproduces
-\textbf{Soviet Quota Gaming} (the car maximises mileage and neglects lane-keeping,
-leaving the lane). The constraint-shaped mitigation restores safe route
-completion. The cross-domain agreement is strong evidence that these are general
+than completing the route -- $0\%$ completion), while an odometer/activity reward
+reproduces \textbf{Soviet Quota Gaming} (the car maximises mileage by speeding,
+completing the route but over the speed limit -- $\sim\!0\%$ \emph{safe}
+completion). The constraint-shaped mitigation restores safe route completion.
+The cross-domain agreement is strong evidence that these are general
 reward-misspecification failure modes.
 
 \input{cross_domain_table.tex}

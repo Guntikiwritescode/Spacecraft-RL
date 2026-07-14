@@ -1,0 +1,37 @@
+==============================================================================
+GOODHART'S TAXONOMY -- STATISTICAL ANALYSIS
+==============================================================================
+
+Per-condition summary (mean [95% bootstrap CI over seeds])
+------------------------------------------------------------------------------
+algo reward            seeds            dock%            safe%     reward
+PPO  constraint_gated      5 100% [100%,100%]     23% [0%,63%]      775.9
+PPO  hackable              5       0% [0%,0%]       0% [0%,0%]     1008.0
+PPO  hierarchical          5   60% [20%,100%]     20% [0%,60%]      763.2
+PPO  mitigated             5   80% [40%,100%]     35% [7%,70%]      625.4
+PPO  potential             5   80% [40%,100%]     35% [7%,72%]      625.4
+PPO  quota_hackable        5     17% [0%,51%]       0% [0%,0%]      967.7
+SAC  hackable              3       0% [0%,0%]       0% [0%,0%]     1222.1
+SAC  mitigated             3     12% [0%,35%]     12% [0%,35%]      459.4
+TD3  hackable              3       0% [0%,0%]       0% [0%,0%]      876.5
+TD3  mitigated             3       0% [0%,0%]       0% [0%,0%]     -578.5
+
+Mann-Whitney U tests (experimental unit = seed)
+------------------------------------------------------------------------------
+(1) Per-algorithm: docking success, hackable vs mitigated
+  PPO                          U=   2.5 p=0.01996 *  medians 0.00 vs 1.00  rank-biserial=0.80
+  SAC                          U=   3.0 p=0.505 ns  medians 0.00 vs 0.00  rank-biserial=0.33
+  TD3                          U=   nan p=1 ns  medians 0.00 vs 0.00  rank-biserial=0.00
+
+(2) Pooled across algorithm families (headline claim)
+  pooled                       U=  33.0 p=0.01522 *  medians 0.00 vs 0.00  rank-biserial=0.45
+
+(3) PPO mitigation ablation: docking success, hackable vs mitigation
+    (Bonferroni-corrected across the mitigation family)
+  mitigated                    U=   2.5 p=0.01996 *  medians 0.00 vs 1.00  rank-biserial=0.80  p_bonf=0.07986
+  potential                    U=   2.5 p=0.01996 *  medians 0.00 vs 1.00  rank-biserial=0.80  p_bonf=0.07986
+  constraint_gated             U=   0.0 p=0.003977 **  medians 0.00 vs 1.00  rank-biserial=1.00  p_bonf=0.01591
+  hierarchical                 U=   5.0 p=0.0668 ns  medians 0.00 vs 1.00  rank-biserial=0.60  p_bonf=0.2672
+
+Significance: *** p<0.001, ** p<0.01, * p<0.05, ns = not significant
+==============================================================================

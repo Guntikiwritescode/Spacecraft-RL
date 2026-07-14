@@ -361,7 +361,7 @@ def fig_mitigation_ablation(groups, tests):
         print("  [skip] mitigation ablation: insufficient data")
         return
     fig, ax = plt.subplots(figsize=(9.5, 5.4))
-    data = [[r["safe_docking_rate"] for r in groups[("PPO", rw)]] for rw in rewards]
+    data = [[r["docking_success_rate"] for r in groups[("PPO", rw)]] for rw in rewards]
     positions = range(len(rewards))
     bp = ax.boxplot(data, positions=list(positions), widths=0.6,
                     patch_artist=True, showmeans=True)
@@ -375,7 +375,7 @@ def fig_mitigation_ablation(groups, tests):
                    d, color="black", s=18, zorder=5, alpha=0.7)
     ax.set_xticks(list(positions))
     ax.set_xticklabels([label_for_reward(r) for r in rewards], rotation=15, ha="right")
-    ax.set_ylabel("Safe-docking rate")
+    ax.set_ylabel("Docking success rate")
     ax.set_ylim(-0.05, 1.05)
     ax.set_title("Mitigation ablation (PPO): each architecture vs the Cobra Effect")
     # significance stars vs hackable

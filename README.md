@@ -6,7 +6,7 @@ A multi-algorithm research campaign demonstrating that **reward hacking emerges
 universally** — across RL algorithm families, reward architectures, and physical
 domains — in a safety-critical **6-DOF spacecraft docking** environment with full
 3D Clohessy–Wiltshire orbital dynamics, and that principled reward design
-eliminates it.
+restores the intended behaviour.
 
 > *In 1902, colonial authorities in Delhi offered a bounty for dead cobras.
 > Residents bred cobras to collect it. When the scheme was cancelled, the
@@ -28,19 +28,21 @@ orbital dynamics, we show that a plausible-looking dense reward generates the
 end the reward stream. Across **PPO, SAC, and TD3** and multiple seeds, the
 failure is **algorithm-family-independent** — it is a property of the reward, not
 the optimiser. We taxonomise a second failure mode (**Soviet Quota Gaming**),
-show four mitigation architectures eliminate the exploit (with Mann–Whitney *U*
-significance testing), map the reward-coefficient boundary at which hacking
-emerges, and **transfer the entire taxonomy to autonomous lane-keeping**,
-demonstrating domain-independence. We connect the findings to Goodhart's Law and
-to emergent-misalignment-from-reward-hacking research on large language models.
+show four mitigation architectures each restore docking (demonstrated fully on
+PPO, with Mann–Whitney *U* significance testing), map the reward-coefficient
+boundary at which hacking emerges, and **transfer the entire taxonomy to
+autonomous lane-keeping**, demonstrating domain-independence. We connect the
+findings to Goodhart's Law and to emergent-misalignment-from-reward-hacking
+research on large language models.
 
 ## Key Results
 
 ![Docking success across algorithm families](figures/fig05_success_bars.png)
 
 *Exploitable rewards (vermillion/orange) collapse docking success to near-zero
-across PPO, SAC and TD3; mitigated rewards (green/blue) dock reliably. **Reward
-structure, not the optimiser, determines the outcome.***
+across PPO, SAC and TD3 — the algorithm-family-independent result; the mitigated
+reward (green) restores docking (fully on PPO). **Reward structure, not the
+optimiser, determines whether the exploit appears.***
 
 ![3D trajectories](figures/fig01_trajectories_3d.png)
 

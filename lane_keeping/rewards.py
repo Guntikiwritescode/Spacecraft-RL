@@ -25,11 +25,12 @@ import numpy as np
 class LKRewardConfig:
     centering_weight: float = 1.0     # Cobra-Effect farmable surface
     center_scale: float = 0.8         # [m] width of the centring bonus
-    progress_weight: float = 0.3      # telescoping progress guidance
+    progress_weight: float = 0.3      # weak progress guidance (hackable/quota)
+    progress_weight_mitigated: float = 2.0  # strong progress guidance (mitigated)
     odometer_weight: float = 1.0      # quota-gaming farmable surface
     completion_bonus: float = 5.0     # hackable: small terminal bonus
     completion_bonus_mitigated: float = 100.0
-    time_penalty: float = 0.2
+    time_penalty: float = 0.05
     lane_penalty: float = 2.0
     speed_penalty: float = 1.0
 
@@ -94,8 +95,10 @@ class LKMitigatedReward(LKRewardFunction):
 
     def compute(self, info) -> float:
         cfg = self.cfg
-        r = cfg.progress_weight * (info["progress"] - self.prev_s)   # telescoping
-        r -= cfg.time_penalty                                         # time costs
+        # Strong telescoping progress guidance -> the car actually drives the
+        # route; a small time penalty discourages dawdling without stalling it.
+        r = cfg.progress_weight_mitigated * (info["progress"] - self.prev_s)
+        r -= cfg.time_penalty
         if info["off_lane"]:
             r -= cfg.lane_penalty
         if info["over_speed"]:

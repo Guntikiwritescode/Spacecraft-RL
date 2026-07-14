@@ -36,8 +36,10 @@ RECORDS_PATH = os.path.join(RESULTS_DIR, "sensitivity_records.jsonl")
 
 # Grid axes (defaults). proximity_weight = exploit strength;
 # dock_bonus = reward for actually completing the mission.
-PROXIMITY_WEIGHTS = [0.0, 0.5, 1.0, 2.0, 4.0]
-DOCK_BONUSES = [10.0, 25.0, 50.0, 100.0, 200.0]
+# proximity_weight (standoff-bump strength) spans the docking->holding boundary
+# found empirically (~16-24); dock_bonus is the true-objective incentive.
+PROXIMITY_WEIGHTS = [0.0, 8.0, 16.0, 24.0, 32.0]
+DOCK_BONUSES = [10.0, 50.0, 100.0, 200.0]
 
 
 def train_eval_config(proximity_weight: float, dock_bonus: float, seed: int,

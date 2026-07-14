@@ -176,11 +176,11 @@ def run_hypothesis_tests(groups) -> dict:
     # (3) Mitigation ablation (PPO): hackable vs each mitigation, Bonferroni.
     ablation = {}
     if ("PPO", HACKABLE) in groups:
-        base = per_seed_rates(groups[("PPO", HACKABLE)], "safe_docking_rate")
+        base = per_seed_rates(groups[("PPO", HACKABLE)], "docking_success_rate")
         comparisons = [m for m in MITIGATIONS if ("PPO", m) in groups]
         n_comp = max(len(comparisons), 1)
         for m in comparisons:
-            b = per_seed_rates(groups[("PPO", m)], "safe_docking_rate")
+            b = per_seed_rates(groups[("PPO", m)], "docking_success_rate")
             res = mann_whitney(base, b)
             res["p_bonferroni"] = min(1.0, res["p_value"] * n_comp) \
                 if not np.isnan(res["p_value"]) else float("nan")
@@ -232,7 +232,7 @@ def format_report(summary_rows, tests) -> str:
         L.append("(2) Pooled across algorithm families (headline claim)")
         L.append(fmt_test("pooled", tests["pooled_hackable_vs_mitigated"]))
     L.append("")
-    L.append("(3) PPO mitigation ablation: safe-docking, hackable vs mitigation")
+    L.append("(3) PPO mitigation ablation: docking success, hackable vs mitigation")
     L.append("    (Bonferroni-corrected across the mitigation family)")
     for m, t in tests.get("ppo_mitigation_ablation_safe_docking", {}).items():
         L.append(fmt_test(m, t))

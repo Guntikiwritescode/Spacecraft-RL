@@ -297,18 +297,23 @@ class ShapedHackableReward(RewardFunction):
     def compute(self, state, action, info) -> float:
         cfg = self.cfg
         d = info["distance_to_target"]
-        # Dense telescoping guidance toward a slow, on-axis dock (makes docking
-        # reliably learnable when the exploit is weak).
-        coef = cfg.shaping_far if d > 50.0 else cfg.shaping_close
-        r = self._approach_shaping(info, coef)
-        # Tunable standoff bump: the exploit surface (scaled by proximity_weight).
-        r += self._standoff_bump(d)
-        if info["safe_docked"]:
+        speed = info["speed"]
+        # Modest dense distance-reduction guidance toward the dock: enough to
+        # make docking learnable when the exploit is weak, but weak enough that a
+        # strong-enough standoff bump can locally overpower it.
+        r = 2.0 * (self.prev_distance - d)
+        # Tunable standoff bump (scaled by proximity_weight): a gentle far ramp
+        # for the approach, a STEEP near barrier so that above a critical
+        # proximity_weight the agent parks at the ring instead of docking.
+        if d >= cfg.standoff_distance:
+            frac = 1.0 - (d - cfg.standoff_distance) / 60.0
+        else:
+            frac = 1.0 - (cfg.standoff_distance - d) / 6.0
+        r += cfg.proximity_weight * max(0.0, frac)
+        if info["docked"]:
             r += cfg.dock_bonus
-        if info["velocity_violation"]:
-            r -= cfg.velocity_penalty
         r += self._fuel_term(info, cfg.fuel_weight_mitigated)
-        self._update_prev(info)
+        self.prev_distance = d
         return float(r)
 
 
