@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -e ".[dev]"
+
+      - name: Run test suite
+        run: pytest tests/ -q
+
+      - name: Smoke-test the pipeline (tiny budget)
+        run: |
+          python -m experiments.benchmark_algorithms \
+            --algos PPO --rewards hackable mitigated --seeds 1 --timesteps 3000 --eval-episodes 3
+          python -m experiments.statistical_analysis
+          python -m experiments.visualize
+          python -m experiments.generate_paper
+
+      - name: Verify key artifacts were produced
+        run: |
+          test -f results/statistics_report.txt
+          test -f results/summary_table.csv
+          ls figures/*.png

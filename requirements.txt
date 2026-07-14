@@ -1,0 +1,23 @@
+# Core RL framework (pinned for reproducibility)
+stable-baselines3==2.9.0
+gymnasium==1.3.0
+
+# Scientific computing
+numpy
+scipy
+pandas
+
+# Visualization
+matplotlib
+seaborn
+
+# Experiment tracking (optional, runs offline by default)
+wandb
+
+# Configuration & utilities
+pyyaml
+tqdm
+rich
+
+# Paper generation
+pylatex

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goodharts-taxonomy"
+version = "0.1.0"
+description = "Historically-documented incentive failures as a framework for reward misspecification in safety-critical RL: a multi-algorithm spacecraft-docking reward-hacking study."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Goodhart's Taxonomy Research Campaign" }]
+keywords = ["reinforcement-learning", "reward-hacking", "ai-safety",
+            "goodharts-law", "spacecraft", "clohessy-wiltshire", "gymnasium"]
+dependencies = [
+    "gymnasium==1.3.0",
+    "stable-baselines3==2.9.0",
+    "numpy",
+    "scipy",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "pyyaml",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+tracking = ["wandb"]
+paper = ["pylatex"]
+dev = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/Guntikiwritescode/Spacecraft-RL"
+
+[tool.setuptools]
+packages = ["goodharts_docking", "lane_keeping", "experiments"]
+
+[project.entry-points."gymnasium.envs.__root__"]
+GoodhartsDocking-v0 = "goodharts_docking:DockingEnv"
+LaneKeeping-v0 = "lane_keeping:LaneKeepingEnv"

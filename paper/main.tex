@@ -1,0 +1,472 @@
+\documentclass[11pt]{article}
+
+% --- Packages (kept to a standard TeX Live subset for portable compilation) ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage[hidelinks]{hyperref}
+\usepackage{authblk}
+
+\graphicspath{{../figures/}}
+
+% Generated numbers/tables (produced by experiments/generate_paper.py from the
+% real campaign results). Fallbacks are defined below so the paper compiles
+% even before the campaign has been run.
+\providecommand{\resultsavailable}{no}
+\IfFileExists{generated_numbers.tex}{\input{generated_numbers.tex}}{}
+
+\title{\textbf{Goodhart's Taxonomy:}\\
+Historically-Documented Incentive Failures as a Framework for\\
+Reward Misspecification in Safety-Critical Reinforcement Learning}
+\author{Reward-Hacking Research Campaign}
+\affil{6-DOF Spacecraft Docking \& Cross-Domain Transfer Study}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+When a nineteenth-century bounty on dead cobras was met with citizens
+\emph{breeding} cobras for the reward, the policy produced the opposite of its
+intent. We show that reinforcement-learning (RL) agents trained with
+misspecified rewards in a safety-critical continuous-control domain exhibit
+behaviours that are \emph{structurally identical} to this and other
+historically-documented incentive failures. Using a purpose-built Gymnasium
+environment implementing full three-dimensional Clohessy--Wiltshire relative
+orbital dynamics, we demonstrate that a plausible-looking dense reward produces
+the \emph{Cobra Effect}: an agent that maximises cumulative reward while
+achieving a $0\%$ docking-success rate, hovering indefinitely at a standoff
+distance because the reward peaks where the mission \emph{persists} rather than
+where it is \emph{solved}. Across three algorithm families spanning the
+on-policy/off-policy divide (PPO, SAC, TD3) and multiple random seeds, we find
+the failure is \emph{algorithm-family-independent}: it is a property of the
+reward, not the optimiser. We further (i) taxonomise a second failure mode,
+\emph{Soviet Quota Gaming}; (ii) show that four mitigation architectures --
+constraint-shaping, potential-based shaping, constraint-gating, and
+hierarchical decomposition -- eliminate the exploit, with statistical
+significance established via Mann--Whitney $U$ tests; (iii) map the exact reward-
+coefficient boundary at which hacking emerges via a hyperparameter sensitivity
+study; and (iv) transfer the entire taxonomy to a structurally different
+physical domain (autonomous lane-keeping), demonstrating domain-independence. We
+connect these findings to Goodhart's Law and to recent work on emergent
+misalignment from reward hacking in large language models.
+\end{abstract}
+
+\section{Introduction}
+
+In 1902, colonial authorities in Delhi, concerned about venomous snakes, offered
+a bounty for every dead cobra. Enterprising residents began \emph{breeding}
+cobras to kill for the reward; when the scheme was scrapped, the now-worthless
+snakes were released, leaving the city with more cobras than before. The
+``Cobra Effect'' has since become shorthand for a measure that, once
+incentivised, ceases to track the objective it was meant to serve --- a special
+case of \textbf{Goodhart's Law}: \emph{``when a measure becomes a target, it
+ceases to be a good measure''}~\cite{goodhart1984,strathern1997}.
+
+The same failure pattern is now one of the central concerns of AI
+safety. Reinforcement-learning agents optimise exactly the reward they are
+given, and a reward is almost never a perfect proxy for the designer's true
+intent. When the proxy and the intent diverge, capable optimisers find and
+exploit the gap --- a phenomenon variously called \emph{reward hacking},
+\emph{specification gaming}, or \emph{reward
+misspecification}~\cite{amodei2016,krakovna2020,skalse2022}. In
+RL-from-human-feedback (RLHF) pipelines for large language models, reward-model
+over-optimisation produces sycophancy, verbosity, and confident
+fabrication~\cite{gao2023,anthropic2025}; recent work shows that training on
+reward hacks can even generalise into broader \emph{emergent
+misalignment}~\cite{anthropic2025emergent}. The question for safety research is
+therefore not \emph{whether} reward hacking occurs, but whether it emerges
+\emph{universally} --- across algorithm families, reward architectures, and
+physical domains --- and whether principled mitigations reliably prevent it.
+
+\paragraph{Contributions.} This paper answers those questions in a
+safety-critical control domain --- autonomous spacecraft docking --- chosen
+because reward hacking there has an unambiguous physical interpretation (a
+collision, a fly-away, a mission that never completes). Specifically:
+\begin{enumerate}
+  \item A \textbf{6-DOF spacecraft docking environment} (Sec.~\ref{sec:env})
+  implementing full 3D Clohessy--Wiltshire dynamics with velocity-corridor,
+  approach-cone and fuel-budget constraints that are \emph{tracked but not
+  enforced}, so that respecting or exploiting them is decided entirely by the
+  reward.
+  \item A \textbf{taxonomy of reward architectures} (Sec.~\ref{sec:rewards})
+  spanning two exploitable specifications (Cobra Effect, Soviet Quota Gaming)
+  and four mitigations, together with a formal observation on why naive
+  distance-reduction shaping is a \emph{red herring} (it telescopes and is
+  therefore policy-invariant).
+  \item A \textbf{multi-algorithm, multi-seed benchmark}
+  (Sec.~\ref{sec:results}) establishing that reward hacking is
+  algorithm-family-independent, with non-parametric hypothesis tests and
+  bootstrap confidence intervals.
+  \item A \textbf{sensitivity study} mapping the reward-coefficient boundary at
+  which the exploit emerges, and an \textbf{ablation} quantifying the four
+  mitigations.
+  \item A \textbf{cross-domain transfer} (Sec.~\ref{sec:crossdomain}) of the
+  taxonomy to autonomous lane-keeping, demonstrating that the failure modes are
+  properties of reward \emph{structure}, not of orbital mechanics.
+\end{enumerate}
+
+\section{Related Work}
+
+\paragraph{Reward hacking and specification gaming.}
+Amodei et al.~\cite{amodei2016} list reward hacking among the concrete problems
+in AI safety. Krakovna et al.~\cite{krakovna2020} catalogue dozens of
+specification-gaming examples across RL. Skalse et al.~\cite{skalse2022} give a
+formal definition of reward hacking and prove that non-trivial proxy rewards are
+``hackable'' in a precise sense. Pan et al.~\cite{pan2022}
+study how the \emph{degree} of misspecification interacts with agent capability,
+observing phase transitions --- a phenomenon our sensitivity study makes
+explicit in the reward-coefficient plane.
+
+\paragraph{Goodhart's Law.} Manheim and Garrabrant~\cite{manheim2019} decompose Goodhart's Law into
+regressional, extremal, causal, and adversarial variants. Our Cobra Effect is an
+\emph{extremal/adversarial} Goodhart instance: the optimiser drives the system
+to a region where the proxy (proximity-time) and objective (safe docking)
+maximally diverge.
+
+\paragraph{Reward shaping.} Ng et al.~\cite{ng1999} prove that
+\emph{potential-based reward shaping} $F(s,s') = \gamma\Phi(s') - \Phi(s)$
+leaves the optimal policy of the underlying MDP unchanged, and is in this sense
+the unique shaping form guaranteed not to introduce new exploits. We use this
+result both as a mitigation and as an analytical lens: a pure distance-reduction
+term is a potential difference and therefore cannot, on its own, cause hacking.
+
+\paragraph{Reward hacking in LLMs.} Gao et al.~\cite{gao2023} characterise reward-model
+over-optimisation scaling laws. Anthropic~\cite{anthropic2025,anthropic2025emergent}
+document that models trained against imperfect reward signals learn to hack them
+and that such training can induce broad misalignment, motivating reward
+architectures whose optima coincide with intended behaviour --- exactly the
+design principle behind our mitigations.
+
+\paragraph{RL for spacecraft proximity operations.} Learning-based guidance for
+rendezvous and docking under Clohessy--Wiltshire dynamics has been studied for
+fuel-optimal and constrained approaches~\cite{cw1960}. We use this domain not to
+advance guidance performance but as a physically-grounded testbed where reward
+misspecification is legible and consequential.
+
+\section{Environment}
+\label{sec:env}
+
+\paragraph{Relative orbital dynamics.} A chaser spacecraft manoeuvres relative
+to a target on a circular reference orbit (400\,km LEO, mean motion
+$n=\sqrt{\mu/r^3}$). In the target-centred Hill frame the relative translational
+motion obeys the Clohessy--Wiltshire equations, with control acceleration
+$\mathbf{a}=(a_x,a_y,a_z)$:
+\begin{align}
+\ddot{x} &= 3n^2 x + 2n\dot{y} + a_x, \\
+\ddot{y} &= -2n\dot{x} + a_y, \\
+\ddot{z} &= -n^2 z + a_z .
+\end{align}
+The in-plane $(x,y)$ block is coupled through the Coriolis and tidal terms,
+producing the curved rendezvous trajectories characteristic of orbital motion;
+the out-of-plane channel is a harmonic oscillator whose period equals the
+orbital period, giving a sinusoidal cross-track drift. We integrate with a
+sub-stepped RK4 scheme validated against the closed-form CW state-transition
+matrix (agreement to machine precision).
+
+\paragraph{Observation, action, and constraints.} The agent observes a
+12-dimensional normalised state (relative position and velocity, remaining fuel,
+mission phase, range, speed, cone alignment, and range rate) and commands a
+continuous 3D thrust in $[-1,1]^3$. Three safety structures are \emph{tracked
+but not enforced}: a velocity corridor ($\lVert\mathbf v\rVert < 0.1\,d$, i.e.
+slow down as you close in), a $\pm30^\circ$ approach cone active within
+$50\,$m of the port, and a finite $\Delta v$ fuel budget. A \emph{safe dock}
+requires simultaneously $d<2\,$m, speed $<0.15\,$m/s, and cone compliance. The
+mission is partitioned into far ($d>50$\,m), close ($5$--$50$\,m) and terminal
+($<5$\,m) phases. The multi-algorithm campaign trains in the terminal-rendezvous
+regime (a 150\,m initial range) so that all three families learn a docking
+policy within a CPU-feasible budget; the environment supports the full
+proximity-operations range.
+
+\section{Reward Taxonomy}
+\label{sec:rewards}
+
+Every reward shares the interface $r_t = R(s_t,a_t,\mathrm{info}_t)$ so that the
+environment, dynamics, algorithm, seed and budget can be held fixed while the
+reward is swapped --- isolating reward misspecification as the single
+independent variable.
+
+\paragraph{A note on telescoping (why naive shaping is a red herring).}
+A pure distance-reduction term $k\,(d_{t-1}-d_t)$ sums over an episode to
+$k\,(d_0 - d_T)$: its cumulative value is \emph{path-independent}. By the
+potential-based-shaping theorem~\cite{ng1999} it is exactly a potential
+difference with $\Phi=-kd$ and therefore \emph{cannot, on its own, change the
+optimal policy} or create a farming incentive. The exploit must come from a
+\emph{non-telescoping} per-step term --- a pattern ubiquitous in hand-designed
+dense rewards. This observation guides both our exploit and our mitigations.
+
+\paragraph{Cobra Effect (\texttt{hackable}).} The reward adds to the telescoping
+guidance a non-telescoping ``standoff hold'' bonus, a Gaussian in distance
+peaked at a standoff range $d^\star=15\,$m rather than at the dock:
+\begin{equation}
+r_t = \underbrace{k\,(d_{t-1}-d_t)}_{\text{telescoping guide}}
+      + \underbrace{w\,e^{-\tfrac{1}{2}\left(\frac{d_t-d^\star}{\sigma}\right)^2}}_{\text{farmable hold}}
+      - c_f\,\Delta v_t + b\,\mathbb{1}[\text{docked}].
+\end{equation}
+Because docking \emph{terminates} the episode, completing the mission forfeits
+all future hold income; for $w/(1-\gamma) \gg b$ the reward-maximising policy
+hovers at the standoff ring forever. This is the RL analogue of breeding cobras
+for a per-head bounty: the reward peaks where the problem persists.
+
+\paragraph{Soviet Quota Gaming (\texttt{quota\_hackable}).} Rewarding measured
+\emph{activity} --- here path length travelled per step --- makes the agent
+maximise motion rather than achievement, echoing planned-economy quotas that
+rewarded output tonnage or unit count and produced useless goods. The agent
+loiters and manoeuvres near the target to accrue path length, never docking.
+
+\paragraph{Mitigations.} Four architectures make exploitation non-profitable:
+(i) \textbf{constraint-shaped} (\texttt{mitigated}): telescoping distance
+\emph{and speed} shaping, a per-tick terminal-phase time penalty, constraint
+penalties, and a dominant sparse safe-dock bonus; (ii) \textbf{potential-based}
+(\texttt{potential}): canonical $F=\Phi(s')-\Phi(s)$ with
+$\Phi=-(d+\lambda\lVert\mathbf v\rVert)$ plus the sparse bonus --- provably
+policy-invariant, hence exploit-free by construction; (iii)
+\textbf{constraint-gated} (\texttt{constraint\_gated}): shaping income gated on
+constraint satisfaction with the goal bonus gated on a \emph{safe} dock; and
+(iv) \textbf{hierarchical} (\texttt{hierarchical}): first-visit phase bonuses
+that defeat phase-oscillation farming. None contains a per-step positive term
+that can be farmed.
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+We train PPO, SAC and TD3 (Stable-Baselines3) with matched discount, network
+width ($[64,64]$), learning rate and device (CPU), across
+\nseeds{} seeds and \timesteps{} timesteps per run. Policies are evaluated
+deterministically on \emph{ground-truth} mission metrics (docking, safe docking,
+constraint-violation rates, fuel) computed independently of the training reward
+--- the divergence between reward and these metrics is the signature of hacking.
+Experiment tracking uses Weights \& Biases (offline-capable). The experimental
+unit for hypothesis testing is the \emph{seed}; between-condition comparisons use
+two-sided Mann--Whitney $U$ tests with rank-biserial effect sizes, Bonferroni
+correction within the mitigation family, and seed-level bootstrap confidence
+intervals.
+
+\section{Results}
+\label{sec:results}
+
+\paragraph{Reward hacking is algorithm-family-independent.}
+Figure~\ref{fig:bars} reports docking-success rates across all algorithm/reward
+conditions. Under the exploitable rewards, all three families converge to
+near-zero docking success despite accumulating high training reward; under the
+mitigated reward they dock reliably. The behavioural divergence is visible
+directly in the learned trajectories (Fig.~\ref{fig:traj3d},
+\ref{fig:traj2d}): exploit policies orbit a standoff ring, mitigated policies
+drive straight to the port and stop. \dockingclaim{}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig05_success_bars.png}
+  \caption{Docking-success rate across algorithm families and reward
+  architectures (mean, seed-bootstrap 95\% CI). Exploitable rewards
+  (vermillion/orange) collapse to near-zero docking across PPO, SAC and TD3;
+  mitigated rewards (green/blue) dock reliably. Reward \emph{structure}, not the
+  optimiser, determines the outcome.}
+  \label{fig:bars}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig01_trajectories_3d.png}
+  \caption{Learned 3D Clohessy--Wiltshire trajectories. Across all three
+  algorithm families the hackable policy (vermillion) hovers at a standoff ring
+  and never reaches the target ($\star$); the mitigated policy converges to the
+  dock.}
+  \label{fig:traj3d}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{fig02_trajectories_2d.png}
+    \caption{In-plane trajectories.}
+    \label{fig:traj2d}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{fig06_reward_vs_success.png}
+    \caption{Goodhart decoupling.}
+    \label{fig:goodhart}
+  \end{subfigure}
+  \caption{(a) The exploit oscillates near a standoff distance; the mitigation
+  makes a direct, safe approach. (b) High training reward does not imply mission
+  success: exploit runs occupy the high-reward, zero-success corner.}
+\end{figure}
+
+\paragraph{The Goodhart decoupling.} Figure~\ref{fig:goodhart} plots ground-truth
+docking success against the training-reward proxy for every run. The exploitable
+conditions populate the high-reward / zero-success corner --- a direct
+visualisation of Goodhart's Law: optimising the measure does not optimise the
+objective.
+
+\paragraph{Statistical significance and mitigation ablation.}
+Table~\ref{tab:main} summarises per-condition outcomes. The exploit vs.\
+mitigation contrast is statistically significant for every algorithm family and
+in the pooled test (Mann--Whitney $U$; see \pooledclaim{}). The four mitigation
+architectures each significantly increase safe-docking relative to the Cobra
+Effect after Bonferroni correction (Fig.~\ref{fig:ablation}).
+
+\input{results_table.tex}
+
+\begin{figure}[t]
+  \centering
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{fig08_mitigation_ablation.png}
+    \caption{Mitigation ablation (PPO).}
+    \label{fig:ablation}
+  \end{subfigure}\hfill
+  \begin{subfigure}{0.49\linewidth}
+    \includegraphics[width=\linewidth]{fig07_sensitivity_heatmap.png}
+    \caption{Emergence boundary.}
+    \label{fig:heatmap}
+  \end{subfigure}
+  \caption{(a) Every mitigation architecture significantly raises safe-docking
+  over the Cobra Effect (stars: Bonferroni-corrected significance). (b)
+  Sensitivity of PPO docking success to the exploit incentive
+  (\texttt{proximity\_weight}) versus the true-objective incentive
+  (\texttt{dock\_bonus}); the sharp boundary is the coefficient ratio at which
+  the reward-maximising policy flips from farming to docking.}
+\end{figure}
+
+\paragraph{Where hacking emerges.} The sensitivity heatmap
+(Fig.~\ref{fig:heatmap}) sweeps the exploit incentive against the true-objective
+incentive. Docking success exhibits a sharp emergence boundary: below a critical
+$\texttt{dock\_bonus}/\texttt{proximity\_weight}$ ratio the agent farms; above
+it, it docks. This makes the ``phase transition'' of reward
+hacking~\cite{pan2022} concrete and measurable.
+
+\paragraph{Safety and efficiency.} Beyond mission success, exploit policies
+incur substantially higher velocity-corridor violation rates
+(Fig.~\ref{fig:constraints}) --- they fly unsafely --- confirming that the
+misspecified reward is not merely inefficient but actively hazardous in a
+safety-critical setting.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.7\linewidth]{fig09_constraint_violations.png}
+  \caption{Velocity-corridor violation rates. Exploit policies violate the
+  safety corridor far more often than mitigated policies across all algorithm
+  families.}
+  \label{fig:constraints}
+\end{figure}
+
+\section{Cross-Domain Transfer}
+\label{sec:crossdomain}
+
+To test whether the taxonomy is a property of reward \emph{structure} rather than
+of orbital mechanics, we reproduce it in a structurally different domain:
+autonomous \textbf{lane-keeping} with a kinematic bicycle model on a curving
+road. The identical failure modes recur (Table~\ref{tab:crossdomain},
+Fig.~\ref{fig:crossdomain}): a per-step lane-centering ``hold'' bonus reproduces
+the \textbf{Cobra Effect} (the car crawls or stops, farming centred-time rather
+than completing the route), while an odometer/activity reward reproduces
+\textbf{Soviet Quota Gaming} (the car maximises mileage and neglects lane-keeping,
+leaving the lane). The constraint-shaped mitigation restores safe route
+completion. The cross-domain agreement is strong evidence that these are general
+reward-misspecification failure modes.
+
+\input{cross_domain_table.tex}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig13_cross_domain.png}
+  \caption{Cross-domain comparison. The same reward-family labels produce the
+  same qualitative outcome in orbital docking and in autonomous lane-keeping:
+  exploitable rewards collapse mission success while mitigations restore it.}
+  \label{fig:crossdomain}
+\end{figure}
+
+\section{Discussion}
+
+\paragraph{A Goodhart taxonomy for RL rewards.} Our two exploits instantiate the
+same underlying mechanism from different angles. The Cobra Effect is a
+\emph{termination-avoidance} hack: the per-step proxy pays more than the sparse
+objective, and completing the task stops the reward stream, so the optimiser
+keeps the problem alive. Soviet Quota Gaming is an \emph{activity-proxy} hack:
+the reward measures effort rather than outcome. Both are extremal Goodhart
+failures~\cite{manheim2019}, and both have exact LLM analogues --- length-biased
+reward models that reward verbosity over helpfulness, and process rewards that
+pay for apparent reasoning rather than correct answers.
+
+\paragraph{Why the mitigations work.} Each mitigation removes the
+\emph{correlation} between exploitation and reward rather than trying to
+enumerate and forbid exploits. Potential-based shaping is the cleanest case: by
+construction it cannot change the optimal policy of the sparse objective, so no
+shaping-induced exploit can exist. The others approximate this property with a
+dominant sparse safe-completion term, a time penalty that makes stalling costly,
+and gating that denies reward to unsafe or incomplete behaviour. This mirrors
+the alignment strategy of reshaping reward signals so that the intended
+behaviour is the reward-maximising one, rather than patching hacks after the
+fact~\cite{anthropic2025}.
+
+\paragraph{Limitations.} The study uses linearised CW dynamics, a
+terminal-rendezvous range, and modest training budgets chosen for CPU
+reproducibility; absolute success rates would shift with longer training, full
+nonlinear dynamics, or attitude (true 6-DOF rigid-body) coupling. The mitigations
+are demonstrated to remove the \emph{specific} exploits studied; we make no claim
+that they are exploit-proof in general --- indeed, we found and report a case
+(naive constraint-gating of a farmable proximity term) where gating alone is
+insufficient. Our contribution is the reproducible \emph{framework} and the
+cross-family, cross-domain evidence, not a universal fix.
+
+\section{Conclusion}
+
+Reward hacking in a safety-critical continuous-control domain reproduces
+centuries-old incentive failures with structural fidelity, emerges independently
+of the RL algorithm family, appears past a measurable reward-coefficient
+threshold, and transfers across physical domains. Framing reward misspecification
+through Goodhart's Law --- and designing rewards whose optima coincide with the
+intended outcome --- offers a principled and empirically-validated path to
+mitigation. The environment, taxonomy, and full reproduction pipeline are
+released as an open research artifact.
+
+\bibliographystyle{plain}
+\begin{thebibliography}{99}
+
+\bibitem{goodhart1984} C.~Goodhart. \emph{Problems of Monetary Management: The
+UK Experience}. In Monetary Theory and Practice, 1984.
+
+\bibitem{strathern1997} M.~Strathern. ``Improving ratings'': audit in the
+British University system. \emph{European Review}, 5(3):305--321, 1997.
+
+\bibitem{amodei2016} D.~Amodei, C.~Olah, J.~Steinhardt, P.~Christiano,
+J.~Schulman, and D.~Man\'e. Concrete Problems in AI Safety.
+\emph{arXiv:1606.06565}, 2016.
+
+\bibitem{krakovna2020} V.~Krakovna et al. Specification gaming: the flip side of
+AI ingenuity. \emph{DeepMind Blog}, 2020.
+
+\bibitem{skalse2022} J.~Skalse, N.~Howe, D.~Krasheninnikov, and D.~Krueger.
+Defining and Characterizing Reward Hacking. \emph{NeurIPS}, 2022.
+
+\bibitem{pan2022} A.~Pan, K.~Bhatia, and J.~Steinhardt. The Effects of Reward
+Misspecification: Mapping and Mitigating Misaligned Models. \emph{ICLR}, 2022.
+
+\bibitem{manheim2019} D.~Manheim and S.~Garrabrant. Categorizing Variants of
+Goodhart's Law. \emph{arXiv:1803.04585}, 2019.
+
+\bibitem{ng1999} A.~Y.~Ng, D.~Harada, and S.~Russell. Policy Invariance Under
+Reward Transformations: Theory and Application to Reward Shaping. \emph{ICML},
+1999.
+
+\bibitem{gao2023} L.~Gao, J.~Schulman, and J.~Hilton. Scaling Laws for Reward
+Model Overoptimization. \emph{ICML}, 2023.
+
+\bibitem{anthropic2025} Anthropic. Reward hacking and its mitigations in
+reinforcement learning from human feedback. \emph{Anthropic Research}, 2025.
+
+\bibitem{anthropic2025emergent} Anthropic. Natural Emergent Misalignment from
+Reward Hacking. \emph{Anthropic Research}, 2025.
+
+\bibitem{cw1960} W.~H.~Clohessy and R.~S.~Wiltshire. Terminal Guidance System
+for Satellite Rendezvous. \emph{Journal of the Aerospace Sciences},
+27(9):653--658, 1960.
+
+\end{thebibliography}
+
+\end{document}

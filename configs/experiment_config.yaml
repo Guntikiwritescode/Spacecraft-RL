@@ -1,0 +1,65 @@
+# Goodhart's Taxonomy -- campaign configuration
+# This file documents the canonical experiment settings. The runner scripts
+# accept the same values as command-line flags; the "quick" and "full" presets
+# below trade wall-clock for statistical power.
+
+environment:
+  name: GoodhartsDocking-v0
+  altitude_m: 400000.0          # 400 km LEO reference orbit
+  initial_distance_m: 150.0     # terminal-rendezvous regime used for the campaign
+  dt_s: 1.0
+  max_steps: 500
+  max_thrust_mps2: 0.2
+  initial_fuel_dv_mps: 50.0
+  dock_distance_m: 2.0
+  dock_speed_mps: 0.15
+  cone_half_angle_deg: 40.0
+  velocity_corridor: "speed < 0.1 * distance"
+
+algorithms: [PPO, SAC, TD3]
+
+reward_types:
+  exploitable: [hackable, quota_hackable]
+  mitigations: [mitigated, potential, constraint_gated, hierarchical]
+
+# Reward coefficient defaults (see goodharts_docking/rewards.py::RewardConfig).
+reward_coefficients:
+  shaping_weight: 10.0          # hackable/quota telescoping guide
+  proximity_weight: 3.0         # Cobra-Effect standoff-hold magnitude
+  standoff_distance: 15.0
+  standoff_width: 8.0
+  activity_weight: 3.0          # Quota-gaming path-length reward
+  dock_bonus: 5.0               # hackable terminal bonus (deliberately small)
+  dock_bonus_mitigated: 100.0   # dominant sparse safe-dock bonus
+  step_penalty: 0.05
+  speed_shaping_weight: 10.0
+  lateral_shaping_weight: 5.0
+  velocity_penalty: 2.0
+  cone_penalty: 1.0
+
+presets:
+  quick:                        # fast smoke of the whole pipeline
+    seeds: 3
+    timesteps: 60000
+    eval_episodes: 20
+    sensitivity_seeds: 1
+  full:                         # thesis-scale campaign
+    seeds: 5
+    timesteps: 150000
+    eval_episodes: 50
+    sensitivity_seeds: 3
+
+sensitivity:
+  swept_axes:
+    proximity_weight: [0.0, 0.5, 1.0, 2.0, 4.0]
+    dock_bonus: [10.0, 25.0, 50.0, 100.0, 200.0]
+
+statistics:
+  test: mann_whitney_u
+  correction: bonferroni
+  effect_size: rank_biserial
+  confidence_interval: seed_bootstrap_95
+
+tracking:
+  wandb_project: goodharts-taxonomy
+  wandb_mode: offline           # runs without credentials by default
