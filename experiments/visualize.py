@@ -246,14 +246,19 @@ def _mean_ci(vals):
 
 
 def fig_success_bars(groups):
+    """Headline cross-algorithm figure: the core hackable-vs-mitigated contrast
+    across all three algorithm families (the full taxonomy is in fig08)."""
     if not groups:
         print("  [skip] success bars: no data")
         return
     algos = [a for a in ("PPO", "SAC", "TD3") if any(al == a for (al, _) in groups)]
-    rewards = [r for r in ("hackable", "quota_hackable", "mitigated",
-                           "potential", "constraint_gated", "hierarchical")
-               if any(rw == r for (_, rw) in groups)]
-    fig, ax = plt.subplots(figsize=(max(9, 1.7 * len(algos) * len(rewards)), 5.2))
+    # Core rewards present for every algorithm family.
+    rewards = [r for r in ("hackable", "mitigated")
+               if all((a, r) in groups for a in algos)]
+    if not rewards:
+        rewards = [r for r in ("hackable", "mitigated")
+                   if any((a, r) in groups for a in algos)]
+    fig, ax = plt.subplots(figsize=(9.5, 5.4))
     width = 0.8 / max(len(rewards), 1)
     x = np.arange(len(algos))
     for k, reward in enumerate(rewards):
@@ -265,16 +270,16 @@ def fig_success_bars(groups):
             else:
                 m, lo, hi = np.nan, 0, 0
             means.append(m); los.append(lo); his.append(hi)
-        ax.bar(x + k * width, means, width, yerr=[los, his], capsize=3,
+        ax.bar(x + k * width, means, width, yerr=[los, his], capsize=4,
                color=color_for_reward(reward), label=label_for_reward(reward),
                edgecolor="white", linewidth=0.5)
     ax.set_xticks(x + width * (len(rewards) - 1) / 2)
-    ax.set_xticklabels(algos)
+    ax.set_xticklabels(algos, fontsize=12)
     ax.set_ylabel("Docking success rate")
     ax.set_ylim(0, 1.05)
     ax.set_title("Reward hacking is algorithm-family-independent\n"
-                 "(exploitable rewards -> ~0% docking across PPO, SAC, TD3)")
-    ax.legend(ncol=2, loc="upper center")
+                 "(the Cobra-Effect reward collapses docking across PPO, SAC, TD3)")
+    ax.legend(loc="upper left")
     fig.tight_layout()
     _save(fig, "fig05_success_bars.png")
 

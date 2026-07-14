@@ -171,16 +171,19 @@ sub-stepped RK4 scheme validated against the closed-form CW state-transition
 matrix (agreement to machine precision).
 
 \paragraph{Observation, action, and constraints.} The agent observes a
-12-dimensional normalised state (relative position and velocity, remaining fuel,
-mission phase, range, speed, cone alignment, and range rate) and commands a
-continuous 3D thrust in $[-1,1]^3$. Three safety structures are \emph{tracked
+12-dimensional \emph{scale-invariant} state: the unit line-of-sight direction to
+the target (full resolution at any range -- essential for terminal control,
+where a magnitude-normalised position would collapse toward zero), the relative
+velocity, remaining fuel, mission phase, coarse and fine range features, speed,
+and closing rate. It commands a continuous 3D thrust in $[-1,1]^3$. Three safety structures are \emph{tracked
 but not enforced}: a velocity corridor ($\lVert\mathbf v\rVert < 0.1\,d$, i.e.
-slow down as you close in), a $\pm30^\circ$ approach cone active within
+slow down as you close in), a $\pm40^\circ$ approach cone active within
 $50\,$m of the port, and a finite $\Delta v$ fuel budget. A \emph{safe dock}
-requires simultaneously $d<2\,$m, speed $<0.15\,$m/s, and cone compliance. The
-mission is partitioned into far ($d>50$\,m), close ($5$--$50$\,m) and terminal
-($<5$\,m) phases. The multi-algorithm campaign trains in the terminal-rendezvous
-regime (a 150\,m initial range) so that all three families learn a docking
+(soft capture) requires simultaneously $d<3\,$m, speed $<0.3\,$m/s, and cone
+compliance. The mission is partitioned into far ($d>50$\,m), close
+($5$--$50$\,m) and terminal ($<5$\,m) phases. The multi-algorithm campaign
+trains in the terminal-rendezvous regime (a 100\,m initial range) so that all
+three families learn a docking
 policy within a CPU-feasible budget; the environment supports the full
 proximity-operations range.
 
@@ -201,24 +204,31 @@ optimal policy} or create a farming incentive. The exploit must come from a
 \emph{non-telescoping} per-step term --- a pattern ubiquitous in hand-designed
 dense rewards. This observation guides both our exploit and our mitigations.
 
-\paragraph{Cobra Effect (\texttt{hackable}).} The reward adds to the telescoping
-guidance a non-telescoping ``standoff hold'' bonus, a Gaussian in distance
-peaked at a standoff range $d^\star=15\,$m rather than at the dock:
+\paragraph{Cobra Effect (\texttt{hackable}).} A naive ``maintain proximity to
+the target'' reward: a per-step station-keeping bonus that is maximal at a
+nominal standoff range $d^\star=20\,$m and falls off linearly with deviation,
 \begin{equation}
-r_t = \underbrace{k\,(d_{t-1}-d_t)}_{\text{telescoping guide}}
-      + \underbrace{w\,e^{-\tfrac{1}{2}\left(\frac{d_t-d^\star}{\sigma}\right)^2}}_{\text{farmable hold}}
+r_t = \underbrace{w - \lambda\,\lvert d_t - d^\star\rvert}_{\text{station-keeping bonus}}
       - c_f\,\Delta v_t + b\,\mathbb{1}[\text{docked}].
 \end{equation}
-Because docking \emph{terminates} the episode, completing the mission forfeits
-all future hold income; for $w/(1-\gamma) \gg b$ the reward-maximising policy
-hovers at the standoff ring forever. This is the RL analogue of breeding cobras
-for a per-head bounty: the reward peaks where the problem persists.
+The bonus decreases \emph{monotonically} from the standoff toward the dock, so
+its unique maximum is to park at $d^\star$. The designer intends ``get and stay
+close'' to yield docking; instead, closing in only lowers the per-step reward,
+and docking additionally \emph{terminates} the episode, forfeiting all future
+station-keeping income. For $w/(1-\gamma) \gg b$ the reward-maximising policy
+holds the standoff forever and never docks. This is the RL analogue of breeding
+cobras for a per-head bounty: the proxy (``be near'') is optimised while the
+objective (``complete the dock'') is never met. In an environment that is
+otherwise easy to dock in, we find this station-keeping form robustly yields
+$0\%$ docking, whereas a naive distance-\emph{reduction} reward -- which
+telescopes -- simply pulls the agent to the port (the red-herring above).
 
 \paragraph{Soviet Quota Gaming (\texttt{quota\_hackable}).} Rewarding measured
-\emph{activity} --- here path length travelled per step --- makes the agent
-maximise motion rather than achievement, echoing planned-economy quotas that
-rewarded output tonnage or unit count and produced useless goods. The agent
-loiters and manoeuvres near the target to accrue path length, never docking.
+\emph{activity} --- here path length travelled per step, while remaining engaged
+near the target --- makes the agent maximise motion rather than achievement,
+echoing planned-economy quotas that rewarded output tonnage or unit count and
+produced useless goods. The agent darts and orbits near the target, never
+slowing to the speed a safe dock requires.
 
 \paragraph{Mitigations.} Four architectures make exploitation non-profitable:
 (i) \textbf{constraint-shaped} (\texttt{mitigated}): telescoping distance

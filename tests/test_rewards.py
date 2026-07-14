@@ -39,14 +39,20 @@ def test_overrides_applied():
 
 
 def test_distance_shaping_telescopes():
-    """Pure distance-reduction shaping is path-independent (potential diff)."""
-    r = make_reward("hackable", overrides={"proximity_weight": 0.0,
-                                           "fuel_weight": 0.0})
+    """Potential-based approach shaping is path-independent (a potential diff).
+
+    The distance component of the potential reward telescopes to
+    ``potential_scale * (d0 - d_final)`` regardless of the path taken -- the
+    'telescoping red herring' that a naive distance-reduction reward cannot, on
+    its own, induce farming (Ng et al. 1999)."""
+    r = make_reward("potential")
     r.reset(100.0, 0.0, 0.0)
-    # A meandering path from 100 -> 100 -> 60 -> 80 -> 20 (net 100 -> 20).
-    path = [100.0, 60.0, 80.0, 20.0]
-    total = sum(r.compute(None, None, make_info(d)) for d in path)
-    expected = r.cfg.shaping_weight * (100.0 - 20.0)   # telescopes to endpoints
+    # Meandering path; speed and lateral held at 0 so only the distance term acts.
+    # These far states trigger no dock/violation/fuel terms.
+    path = [100.0, 60.0, 90.0, 50.0]
+    total = sum(r.compute(None, None, make_info(d, speed=0.0, lateral=0.0))
+                for d in path)
+    expected = r.cfg.potential_scale * (100.0 - 50.0)   # telescopes to endpoints
     assert np.isclose(total, expected)
 
 
@@ -55,10 +61,14 @@ def test_standoff_hold_peaks_off_dock():
     dock -- this is what makes hovering, not docking, the optimum."""
     r = make_reward("hackable")
     d_star = r.cfg.standoff_distance
-    hold = lambda d: r._standoff_hold(d)
-    assert hold(d_star) > hold(1.0)      # more reward at standoff than at dock
-    assert hold(d_star) > hold(60.0)     # and than far away
-    assert hold(d_star) >= hold(d_star + 5) and hold(d_star) >= hold(d_star - 5)
+    bump = lambda d: r._standoff_bump(d)   # station-keeping bonus
+    assert bump(d_star) > bump(1.0)      # more reward at standoff than at dock
+    assert bump(d_star) > bump(60.0)     # and than far away
+    assert bump(d_star) >= bump(d_star + 5) and bump(d_star) >= bump(d_star - 5)
+    # monotone decrease from standoff toward the dock (no local max to overshoot)
+    assert bump(15.0) > bump(10.0) > bump(5.0)
+    # non-negative everywhere (no "give up and diverge" incentive)
+    assert all(bump(d) >= 0.0 for d in (0.5, 3, 10, 20, 50, 100, 150))
 
 
 def test_hackable_is_farmable_but_mitigated_is_not():

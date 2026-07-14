@@ -77,14 +77,14 @@ misalignment* that can arise from training on reward hacks
 |---|---|
 | Dynamics | Full 3D Clohessy–Wiltshire (Hill frame), RK4-integrated |
 | Reference orbit | 400 km LEO circular (n ≈ 1.13 × 10⁻³ rad/s, T ≈ 92 min) |
-| State | 12-D: relative position & velocity (3D each), fuel, phase, range, speed, cone alignment, range rate |
+| State | 12-D scale-invariant: unit line-of-sight direction (3D), relative velocity (3D), fuel, phase, coarse + fine range, speed, closing rate |
 | Action | Continuous 3-D thrust ∈ [−1, 1]³ |
 | Max thrust | 0.2 m/s² per axis |
 | Fuel budget | 50 m/s Δv |
-| Safe dock | distance < 2 m **and** speed < 0.15 m/s **and** within approach cone |
+| Safe dock (soft capture) | distance < 3 m **and** speed < 0.3 m/s **and** within approach cone |
 | Velocity corridor | speed < 0.1 × distance (slow down as you close in) |
 | Approach cone | ±40° of the +x docking axis, active within 50 m |
-| Campaign range | 150 m terminal rendezvous (env supports the full 500 m range) |
+| Campaign range | 100 m terminal rendezvous (env supports the full 500 m range) |
 
 The RK4 propagator is validated against the closed-form CW state-transition
 matrix to machine precision (see `tests/test_dynamics.py`). Safety constraints
@@ -149,11 +149,14 @@ gating must be paired with removing the farmable surface.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,tracking,paper]"
 
-# fast smoke that still produces every figure/table/PDF (~15 min CPU):
+# PPO-only smoke that still produces every figure/table/PDF (~45 min CPU):
 bash reproduce.sh quick
 
-# thesis-scale campaign (5 seeds, 150k steps):
+# thesis-scale campaign, all three algorithm families (5 seeds, 120k steps):
 bash reproduce.sh full
+
+# ...or run the campaign parallelised across cores (recommended, ~90 min):
+bash scripts/run_campaign.sh
 ```
 
 Individual stages:

@@ -51,11 +51,11 @@ class DockingEnv(gymnasium.Env):
     MAX_THRUST = 0.2         # per-axis max control accel [m/s^2]
     INITIAL_FUEL = 50.0      # delta-v budget [m/s]
     INITIAL_DISTANCE = 500.0
-    DOCK_DISTANCE = 2.0
-    DOCK_SPEED = 0.15
+    DOCK_DISTANCE = 3.0      # soft-capture radius [m]
+    DOCK_SPEED = 0.3         # soft-capture closing speed [m/s]
     CONE_HALF_ANGLE_DEG = 40.0
     CONE_RANGE = 50.0        # cone constraint active within this range [m]
-    VEL_SCALE = 5.0          # velocity normalisation constant [m/s]
+    VEL_SCALE = 3.0          # velocity normalisation constant [m/s]
 
     def __init__(
         self,
@@ -105,22 +105,30 @@ class DockingEnv(gymnasium.Env):
         return 2.0
 
     def _get_obs(self) -> np.ndarray:
+        """Scale-invariant 12-D observation.
+
+        Position is encoded as a *unit direction vector* (full resolution at any
+        range -- essential for terminal control near the dock, where a
+        magnitude-normalised position would collapse to ~0) plus multi-scale
+        range features (coarse ``d/d0`` and fine ``tanh(d/10)``).
+        """
         x, y, z, vx, vy, vz, fuel, phase = self.state
         distance = float(np.sqrt(x * x + y * y + z * z))
         speed = float(np.sqrt(vx * vx + vy * vy + vz * vz))
         d0, vs = self.INITIAL_DISTANCE, self.VEL_SCALE
-        cone_cos = x / distance if distance > 1e-6 else 1.0
-        range_rate = (x * vx + y * vy + z * vz) / distance if distance > 1e-6 else 0.0
+        inv_d = 1.0 / distance if distance > 1e-6 else 0.0
+        ux, uy, uz = x * inv_d, y * inv_d, z * inv_d          # unit direction
+        range_rate = (x * vx + y * vy + z * vz) * inv_d
         obs = np.array(
             [
-                x / d0, y / d0, z / d0,
-                vx / vs, vy / vs, vz / vs,
-                fuel / self.INITIAL_FUEL,
-                phase / 2.0,
-                distance / d0,
-                speed / vs,
-                cone_cos,
-                range_rate / vs,
+                ux, uy, uz,                                   # direction (full res)
+                vx / vs, vy / vs, vz / vs,                    # velocity
+                fuel / self.INITIAL_FUEL,                     # fuel
+                phase / 2.0,                                  # mission phase
+                distance / d0,                                # coarse range
+                np.tanh(distance / 10.0),                     # fine range (near-dock)
+                speed / vs,                                   # speed magnitude
+                range_rate / vs,                              # closing rate
             ],
             dtype=np.float32,
         )

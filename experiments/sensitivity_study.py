@@ -44,7 +44,7 @@ def train_eval_config(proximity_weight: float, dock_bonus: float, seed: int,
                       timesteps: int, init_dist: float,
                       eval_episodes: int) -> dict:
     overrides = {"proximity_weight": proximity_weight, "dock_bonus": dock_bonus}
-    env = DockingEnv(reward_type="hackable", reward_overrides=overrides,
+    env = DockingEnv(reward_type="shaped_hackable", reward_overrides=overrides,
                      initial_distance=init_dist)
     model = PPO("MlpPolicy", env, verbose=0, seed=seed, device="cpu",
                 learning_rate=3e-4, n_steps=2048, batch_size=64, n_epochs=10,

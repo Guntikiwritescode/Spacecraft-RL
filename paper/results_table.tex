@@ -7,7 +7,16 @@
 \toprule
 Algo & Reward & Seeds & Dock\% [95\% CI] & Safe\% & Final $d$ (m) & VelViol\% & Reward \\
 \midrule
-\multicolumn{8}{c}{\emph{results pending}} \\
+PPO & Constraint-Gated & 5 & 53\% [43\%,61\%] & 43\% & 3.2 & 5\% & 302 \\
+PPO & Hackable (Cobra Effect) & 5 & 2\% [0\%,6\%] & 0\% & 16.9 & 21\% & 1816 \\
+PPO & Hierarchical & 5 & 57\% [48\%,71\%] & 53\% & 3.6 & 5\% & 303 \\
+PPO & Mitigated & 5 & 70\% [62\%,76\%] & 55\% & 2.9 & 5\% & 302 \\
+PPO & Potential-Based & 5 & 65\% [57\%,72\%] & 45\% & 3.1 & 5\% & 305 \\
+PPO & Quota Gaming & 5 & 4\% [0\%,12\%] & 0\% & 20.0 & 25\% & 2205 \\
+SAC & Hackable (Cobra Effect) & 5 & 8\% [0\%,18\%] & 6\% & 16.6 & 21\% & 1825 \\
+SAC & Mitigated & 5 & 69\% [57\%,83\%] & 56\% & 3.2 & 5\% & 303 \\
+TD3 & Hackable (Cobra Effect) & 5 & 1\% [0\%,3\%] & 0\% & 20.3 & 25\% & 2197 \\
+TD3 & Mitigated & 5 & 63\% [47\%,77\%] & 45\% & 3.2 & 5\% & 300 \\
 \bottomrule
 \end{tabular}
 \end{table}

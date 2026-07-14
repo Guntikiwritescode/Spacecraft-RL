@@ -11,14 +11,16 @@ PRESET="${1:-quick}"
 export PYTHONPATH="$(cd "$(dirname "$0")" && pwd)"
 
 if [ "$PRESET" = "full" ]; then
-    SEEDS=5; TS=150000; SENS_SEEDS=3; XSEEDS=5
+    ALGOS="PPO SAC TD3"; SEEDS=5; TS=120000; SENS_SEEDS=3; XSEEDS=3
 else
-    SEEDS=3; TS=60000; SENS_SEEDS=1; XSEEDS=3
+    # quick smoke: PPO only (the slow off-policy families are in `full`),
+    # still enough steps for the Cobra Effect and its mitigation to appear.
+    ALGOS="PPO"; SEEDS=3; TS=100000; SENS_SEEDS=1; XSEEDS=3
 fi
 
-echo "=== [1/6] Core cross-family benchmark (PPO/SAC/TD3, hackable+mitigated) ==="
+echo "=== [1/6] Core cross-family benchmark ($ALGOS, hackable+mitigated) ==="
 python -m experiments.benchmark_algorithms \
-    --algos PPO SAC TD3 --rewards hackable mitigated \
+    --algos $ALGOS --rewards hackable mitigated \
     --seeds "$SEEDS" --timesteps "$TS"
 
 echo "=== [2/6] PPO mitigation ablation (whole taxonomy) ==="
