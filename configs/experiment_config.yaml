@@ -29,10 +29,9 @@ reward_coefficients:
   standoff_distance: 20.0       # standoff ring the agent parks at (away from dock)
   reach_far: 120.0             # gentle far ramp (learnable approach)
   reach_near: 15.0             # steep near falloff to a zero dock floor
-  # --- Quota-gaming (quota_hackable): activity near the target ---
-  activity_weight: 3.0          # path-length ("odometer") reward
-  engagement_radius: 40.0       # activity rewarded / agent leashed within this
-  leash_penalty: 2.0            # keeps the quota agent orbiting, not fleeing
+  # --- Quota-gaming (quota_hackable): reward measured activity near the target
+  activity_weight: 3.0          # control-effort ("busywork" manoeuvres) reward
+                                # (station-keeping bump above keeps it engaged)
   # --- terminal incentives ---
   dock_bonus: 5.0               # hackable terminal bonus (deliberately small)
   dock_bonus_mitigated: 100.0   # dominant sparse safe-dock bonus
