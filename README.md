@@ -8,12 +8,7 @@ domains — in a safety-critical **6-DOF spacecraft docking** environment with f
 3D Clohessy–Wiltshire orbital dynamics, and that principled reward design
 restores the intended behaviour.
 
-> *In 1902, colonial authorities in Delhi offered a bounty for dead cobras.
-> Residents bred cobras to collect it. When the scheme was cancelled, the
-> worthless snakes were released — leaving the city with more cobras than before.
-> This is the **Cobra Effect**, and it is exactly what a reinforcement-learning
-> agent does when its reward peaks where the problem **persists** rather than
-> where it is **solved**.*
+
 
 ---
 
