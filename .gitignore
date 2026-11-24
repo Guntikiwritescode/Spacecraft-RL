@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.egg-info/
+results/trajectories/
+results/previous-*/
+results/*.npz
+results/*.zip
+wandb/
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.pdf
+.DS_Store

@@ -1,0 +1,613 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{../figures/}}
+
+\title{Spacecraft-RL: Misspecified Rewards in a Spacecraft Docking Task}
+\author{Guntikiwritescode}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+I built a Gymnasium environment for spacecraft docking with three-dimensional
+Clohessy-Wiltshire relative motion and trained PPO, SAC and TD3 agents on
+several reward functions. With a reward that pays for staying near the target,
+none of the 11 trained agents docked, and only one of them ended near the
+standoff distance where that reward peaks. A reward that pays for thrust
+magnitude gave 17\% docking under PPO. Under PPO, four rewards that pay for
+approach and for a safe dock gave 60\% to 100\% docking in deterministic
+evaluation but 20\% to 35\% safe docking, and after Bonferroni correction only
+the constraint-gated reward differs significantly from the hackable one. SAC and
+TD3 policies trained on the mitigated reward docked in 37\% and 19\% of their
+training episodes and in 12\% and 0\% of deterministic evaluation episodes. A
+grid over the weight of the standoff bonus shows PPO docking falling as the
+weight rises from 8 to 24. In a lane-keeping task with rewards of the same
+names, PPO completed no route under the hackable reward, every route but none
+safely under the quota reward, and every route safely under the mitigated
+reward.
+\end{abstract}
+
+\section{Introduction}
+
+A reward function is a proxy for what the designer wants. In Strathern's
+phrasing of Goodhart's law, when a measure becomes a target, it ceases to be a
+good measure~\cite{goodhart1984,strathern1997}. In reinforcement learning this
+appears as reward hacking or specification
+gaming~\cite{amodei2016,krakovna2020,skalse2022}. I study it in a docking task,
+where the outcome is easy to read from the state: the chaser spacecraft either
+reaches the dock at low speed or it does not.
+
+The environment, rewards and training scripts are in the Spacecraft-RL
+repository. The experiments compare rewards that pay for proximity or activity
+with rewards that pay for progress and for a safe dock. I call the first group
+hackable because they pay more for staying near the target than for docking.
+Whether a trained agent exploits that by holding station at the standoff is a
+separate question, which Section~\ref{sec:results} answers from the evaluation
+records.
+
+\section{Related Work}
+
+Amodei et al.~\cite{amodei2016} list reward hacking among the concrete problems
+in AI safety, and Krakovna et al.~\cite{krakovna2020} collect examples of
+specification gaming. Clark and Amodei~\cite{clark2016} describe a boat-race
+agent that circled a lagoon to hit respawning targets instead of finishing the
+race. Randl{\o}v and Alstr{\o}m~\cite{randlov1998} rewarded a simulated bicycle
+for driving toward a goal without punishing it for driving away, and the agent
+rode in circles around the start. Skalse et al.~\cite{skalse2022} define reward
+hacking formally. Pan et al.~\cite{pan2022} vary the degree of reward
+misspecification and observe abrupt changes in behavior. Manheim and
+Garrabrant~\cite{manheim2018} separate Goodhart's law into four variants. Ng et
+al.~\cite{ng1999} show that shaping terms of the form
+$\gamma\Phi(s')-\Phi(s)$ leave the optimal policy of the underlying problem
+unchanged. Gao et al.~\cite{gao2023} study over-optimization of learned reward
+models, and MacDiarmid et al.~\cite{macdiarmid2025} report that learning to hack
+rewards in production RL environments is followed by broader misaligned
+behavior in language models. Ray et al.~\cite{ray2019} release Safety Gym, a
+benchmark suite of continuous-control environments for constrained
+reinforcement learning. The docking environment here also reports its
+constraint violations apart from the reward. The orbital dynamics are those of
+Clohessy and Wiltshire~\cite{cw1960}.
+
+\section{Environment}
+\label{sec:env}
+
+\paragraph{Dynamics.} The chaser moves relative to a target on a circular orbit
+at 400\,km altitude with mean motion $n$. In the target-centered Hill frame,
+with thrust acceleration $(a_x,a_y,a_z)$, the motion is
+\begin{align}
+\ddot{x} &= 3n^2 x + 2n\dot{y} + a_x, \\
+\ddot{y} &= -2n\dot{x} + a_y, \\
+\ddot{z} &= -n^2 z + a_z .
+\end{align}
+Only translation is modeled, so the state has three position and three velocity
+components and no attitude. The simulation uses a one-second tick, held thrust
+over the tick, and RK4 with four sub-steps. In the unit tests the integrator
+agrees with the closed-form state-transition matrix to $10^{-6}$, both with 50
+sub-steps over 10 to 300\,s and with the four sub-steps and one-second tick
+used here.
+
+\paragraph{Observation and action.} The action is a thrust vector in
+$[-1,1]^3$, scaled to $0.2$\,m/s$^2$ per axis. Fuel is a budget of 50\,m/s of
+$\Delta v$, spent at $\lVert\mathbf a\rVert\,\Delta t$ per tick. The
+observation has 12 components: the unit direction to the target, the velocity,
+the remaining fuel, the mission phase, two range features (distance divided by
+the initial distance, and $\tanh(d/10)$), the speed, and the range rate
+(positive when moving away). Velocities are divided by 3\,m/s and every
+component is clipped to $[-1,1]$.
+
+\paragraph{Constraints and termination.} The environment tracks three
+constraints and enforces only the third. The velocity corridor is violated when
+the speed exceeds $\max(0.3,\,0.1d)$ m/s. The approach cone is violated when
+$d<50$\,m and the angle between the line of sight and the $+x$ axis exceeds
+$40^\circ$. The fuel budget is 50\,m/s, and thrust is zero once it is used up.
+The impulse of the step that uses the last fuel is applied in full, so the
+budget can be exceeded by up to $0.2\sqrt3\approx0.35$\,m/s. The chaser has
+docked when $d<3$\,m and the speed is below $0.3$\,m/s, which ends the
+episode. A safe dock is a dock without an approach-cone violation. A dock at a
+speed below 0.3\,m/s cannot violate the velocity corridor, whose limit is at
+least 0.3\,m/s.
+
+The velocity corridor and the cone are the safety checks. The mitigated rewards
+pay for them: they penalize violations or scale the approach term down while
+one is active, and they pay the dock bonus only for a safe dock. The hackable
+and quota rewards have no term that depends on either check.
+
+The phase is far for $d>50$\,m, close for $5<d\le 50$\,m and terminal for
+$d\le5$\,m. An episode ends after 500 ticks, or when $d$ exceeds twice the
+initial distance, with a penalty of 50. All experiments start the chaser at
+100\,m (azimuth within $\pm0.3$\,rad and elevation within $\pm0.2$\,rad of the
+$+x$ axis) with a speed of at most 0.1225\,m/s (velocity components in
+$[-0.10,0]$, $[-0.05,0.05]$ and $[-0.05,0.05]$\,m/s). The environment default
+is 500\,m.
+
+\paragraph{Lane-keeping environment.} The second task is a car on a curving
+single-lane road. The state is the progress $s$ along the road, the lateral
+offset $y$, the heading error $\psi$ and the speed $v$. A kinematic bicycle
+model with wheelbase 2.8\,m gives
+$\dot s=v\cos\psi$, $\dot y=v\sin\psi$, $\dot\psi=(v/L)\tan\delta$ and
+$\dot v=a$, integrated by explicit Euler with five sub-steps per tick of
+0.1\,s, with speed kept at or above zero and at most 30\,m/s. The road
+curvature is $\kappa(s)=0.02\sin(2\pi s/60)$\,m$^{-1}$, and each tick subtracts
+$\kappa\,\Delta s$ from the heading error. The action is the steering angle
+$\delta\in[-0.5,0.5]$\,rad and the acceleration $a\in[-3,3]$\,m/s$^2$. The route
+is 120\,m long and an episode lasts at most 400 ticks. The lane half-width is
+1.75\,m and the speed limit is 20\,m/s. The environment reports both limits
+and enforces neither.
+Leaving the road ($|y|>4.5$\,m) ends the episode with a penalty of 20. The
+observation has six components, each clipped to $[-1,1]$: $y/3.5$,
+$\psi/(\pi/4)$, $v/20$, the current curvature divided by 0.02, the fraction of
+the route left, and the lateral rate $v\sin\psi/20$. Each episode starts at
+$s=0$ with $y\in[-0.3,0.3]$\,m, $\psi\in[-0.05,0.05]$\,rad and
+$v\in[2,6]$\,m/s. A route is completed when $s\ge120$\,m and safely completed
+when the car is also in the lane and below the speed limit at that step.
+
+\section{Rewards}
+\label{sec:rewards}
+
+Let $d_t$ be the distance, $v_t$ the speed, $\ell_t=\sqrt{y_t^2+z_t^2}$ the lateral
+offset and $\Delta v_t$ the fuel spent at tick $t$. Define the approach term
+\begin{equation}
+S_t = c\left[(d_{t-1}-d_t) + 8\,(v_{t-1}-v_t) + 12\,(\ell_{t-1}-\ell_t)\right],
+\end{equation}
+with $c=3$ unless stated otherwise. Summed over an episode, $S_t$ equals
+$c$ times the decrease of $d+8v+12\ell$ between the first and last state, so it
+does not depend on the path. This holds for any term of the form
+$\Phi(s_{t-1})-\Phi(s_t)$, and it means that the approach term alone gives no
+reason to stay in place. The policy invariance theorem of Ng et al. does not
+apply, because $S_t$ has no discount factor and the agents train with
+$\gamma=0.99$.
+
+\paragraph{Hackable.} The reward pays a bump that is largest at the standoff distance
+$d^\star=20$\,m,
+\begin{equation}
+r_t = w\,\max\{0,\,g(d_t)\} - 0.01\,\Delta v_t + 5\cdot\mathbb 1[\text{docked}],
+\qquad
+g(d)=\begin{cases}
+1-(d-d^\star)/120 & d\ge d^\star,\\
+1-(d^\star-d)/15 & d<d^\star,
+\end{cases}
+\end{equation}
+with $w=3$. The bump is positive for $5<d<140$\,m and zero inside 5\,m. The
+reward for docking (5) is small next to the per-tick bump of up to 3 over a
+500-tick episode, and docking ends the episode.
+
+\paragraph{Quota.} The \texttt{quota\_hackable} reward adds $3\lVert\mathbf a_t\rVert$ to the hackable reward,
+where $\mathbf a_t$ is the thrust acceleration in m/s$^2$. It pays for control
+effort whether or not the effort brings the chaser closer.
+
+\paragraph{Mitigated rewards.} All four mitigated rewards contain no bump.
+\begin{itemize}
+  \item \texttt{mitigated}: $r_t = S_t - 5\cdot\mathbb 1[\text{velocity violation}] - 2\cdot\mathbb 1[\text{cone violation}] - 0.05\,\Delta v_t + 100\cdot\mathbb 1[\text{safe dock}]$.
+  \item \texttt{potential}: the same terms with $S_t$ written as $\Phi(s_t)-\Phi(s_{t-1})$,
+  $\Phi=-3\,(d+8v+12\ell)$. With the default coefficients this is the same reward
+  function as \texttt{mitigated}, and the two rows of Table~\ref{tab:main} are identical.
+  \item \texttt{constraint\_gated}: $r_t = G_t S_t - 0.05\,\Delta v_t + 100\cdot\mathbb 1[\text{safe dock}]$,
+  where $G_t=0.3$ while the velocity corridor or the approach cone is violated and $1$ otherwise.
+  It has no violation penalties.
+  \item \texttt{hierarchical}: the \texttt{mitigated} reward plus a one-time bonus of 10 on first
+  reaching the close phase and 25 on first reaching the terminal phase.
+\end{itemize}
+The hackable and mitigated rewards differ in the shaping term, the size of the
+dock bonus, the fuel weight and the penalties, so the comparison between them
+does not isolate a single term.
+
+\paragraph{Sensitivity-study reward.} The sensitivity grid in Section~\ref{sec:results} uses a
+fifth reward, \texttt{shaped\_hackable},
+\begin{equation}
+r_t = 2\,(d_{t-1}-d_t) + p\,\max\{0,\,h(d_t)\} + b\cdot\mathbb 1[\text{docked}] - 0.05\,\Delta v_t,
+\end{equation}
+with $h(d)=1-(d-20)/60$ for $d\ge20$ and $h(d)=1-(20-d)/6$ below, where $p$ is
+\texttt{proximity\_weight} and $b$ is \texttt{dock\_bonus}. Unlike the hackable
+reward it contains the progress term $2\,(d_{t-1}-d_t)$.
+
+\paragraph{Lane-keeping rewards.} Three rewards share names with the docking
+rewards, but their terms differ. The \texttt{hackable} reward pays
+$\exp(-0.5(y/0.8)^2)$ per tick for being centered, $0.3$ per meter of progress
+and $5$ for finishing, with a penalty of 2 per tick off the lane. The
+\texttt{quota\_hackable} reward pays the path length travelled per tick and $5$
+for finishing. The \texttt{mitigated} reward pays 2 per meter of progress, 100
+for a safe completion, and penalties of 0.05 per tick, 2 per tick off the lane
+and 1 per tick over the speed limit.
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+I used Stable-Baselines3 PPO, SAC and TD3 on CPU. Table~\ref{tab:settings}
+lists the settings. Anything not listed is the library default. The number of
+seeds and the training steps differ between algorithms, so a difference between
+algorithms mixes the algorithm and its budget. The mitigation comparison, the
+quota reward, the sensitivity grid and lane keeping were run with PPO only. The
+grid has one seed per cell, so the position of its threshold is uncertain. It
+uses the PPO settings with 70,000 steps for each of 20 cells. Lane keeping uses
+the PPO settings with 100,000 steps and 3 seeds per reward.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Training settings of the docking experiments. All three algorithms use
+discount 0.99, learning rate $3\times10^{-4}$ and two hidden layers of 64 units.
+The training environment starts the chaser at 100\,m.}
+\label{tab:settings}
+\begin{tabular}{p{2.2cm}p{3.7cm}p{4.3cm}p{4.3cm}}
+\toprule
+ & PPO & SAC & TD3 \\
+\midrule
+Rewards & all six & \texttt{hackable}, \texttt{mitigated} & \texttt{hackable}, \texttt{mitigated} \\
+Seeds & 5 & 3 & 3 \\
+Training steps & 120,000 & 60,000 & 70,000 \\
+Activation & tanh & ReLU & ReLU \\
+Batch size & 64 & 256 & 256 \\
+Updates & 2048-step rollouts, 10 epochs & 1 gradient step per step & 1 gradient step per step \\
+Other & GAE $\lambda=0.95$, clip 0.2 & $\tau=0.005$, buffer $10^5$, 1000 warm-up steps, learned entropy weight & $\tau=0.005$, buffer $10^5$, 1000 warm-up steps, policy delay 2, target noise 0.2 (clip 0.5), exploration noise $\sigma=0.1$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Observations are scaled by the environment as described in
+Section~\ref{sec:env}, and no normalization wrapper is used. Each trained
+policy is evaluated for 20 deterministic episodes with environment seeds
+$10{,}000+i$ for $i=0,\dots,19$ (lane keeping uses $5000+i$). Every training seed
+is therefore evaluated on the same 20 start states, and the docking rate of a
+seed is the fraction of those episodes that docked. The environment's
+\texttt{info} gives docking, safe docking and constraint violations. The
+training reward is reported separately. The training docking rate in
+Table~\ref{tab:traineval} is the fraction of all episodes of a training run that
+ended in a dock, with the algorithm's own stochastic policy. Confidence
+intervals are percentile bootstrap intervals over seeds (10,000 resamples, one
+seeded generator per interval). Tests are two-sided Mann-Whitney $U$ tests with
+the seed as the unit, rank-biserial effect sizes, and Bonferroni correction over
+the four mitigated rewards. The $p$ values come from SciPy's normal
+approximation with tie correction. For the five-against-five comparisons I also
+computed exact $p$ values by enumerating all 252 splits of the ten seeds into two
+groups of five and ranking ties by midranks. SciPy's \texttt{method="exact"}
+ignores ties and is not valid for these data, so I did not use it.
+
+\section{Results}
+\label{sec:results}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Evaluation results per condition, averaged over seeds. Dock\% is the
+docking rate with a bootstrap 95\% interval over seeds. The remaining columns are
+the safe docking rate, final distance to the target in meters, and the fraction of
+steps in violation of the velocity corridor and the approach cone. Reward is the
+mean evaluation episode reward under the reward used for training.}
+\label{tab:main}
+\begin{tabular}{llcccccccr}
+\toprule
+Algo & Reward & Seeds & Dock\% [95\% CI] & Safe\% & Final $d$ & Vel\% & Cone\% & Reward \\
+\midrule
+PPO & \texttt{hackable} & 5 & 0\% [0\%, 0\%] & 0\% & 80.0 & 2\% & 53\% & 1008 \\
+PPO & \texttt{quota\_hackable} & 5 & 17\% [0\%, 51\%] & 0\% & 59.6 & 1\% & 69\% & 968 \\
+PPO & \texttt{mitigated} & 5 & 80\% [40\%, 100\%] & 35\% & 4.2 & 18\% & 15\% & 625 \\
+PPO & \texttt{potential} & 5 & 80\% [40\%, 100\%] & 35\% & 4.2 & 18\% & 15\% & 625 \\
+PPO & \texttt{constraint\_gated} & 5 & 100\% [100\%, 100\%] & 23\% & 1.9 & 16\% & 12\% & 776 \\
+PPO & \texttt{hierarchical} & 5 & 60\% [20\%, 100\%] & 20\% & 3.4 & 12\% & 7\% & 763 \\
+SAC & \texttt{hackable} & 3 & 0\% [0\%, 0\%] & 0\% & 35.0 & 1\% & 75\% & 1222 \\
+SAC & \texttt{mitigated} & 3 & 12\% [0\%, 35\%] & 12\% & 45.8 & 4\% & 3\% & 459 \\
+TD3 & \texttt{hackable} & 3 & 0\% [0\%, 0\%] & 0\% & 117.3 & 5\% & 35\% & 876 \\
+TD3 & \texttt{mitigated} & 3 & 0\% [0\%, 0\%] & 0\% & 81.2 & 2\% & 11\% & -579 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Hackable and quota rewards.} No seed docked under the hackable
+reward: 0 of 5 for PPO, 0 of 3 for SAC and 0 of 3 for TD3
+(Table~\ref{tab:main}). The mean evaluation reward under the \texttt{hackable}
+reward is 1008 for PPO, 1222 for SAC and 876 for TD3. Rewards are measured under
+each run's own reward function, so they are not comparable between reward
+functions.
+
+Most of these policies do not hold station at the standoff distance of 20\,m
+where the bump peaks. The closest approach averaged over episodes and seeds was
+22.8\,m for PPO, 26.4\,m for SAC and 14.3\,m for TD3, and the final distance was
+80, 35 and 117\,m. PPO seeds 1, 2 and 3 end every episode between 49.6 and
+50.0\,m at a mean final speed below 0.07\,m/s, and seeds 0 and 4 end between 115
+and 152\,m. SAC seed 0 ends between 49.7 and 50.4\,m, and SAC seed 2 ends
+between 24 and 57\,m. The TD3 policies end between 18 and 206\,m at mean final
+speeds of 0.7 to 2.0\,m/s. Some TD3 episodes ended by divergence (mean length
+448), and the fuel budget ran out in 34 of the 60 episodes. No other condition
+used all of its fuel. SAC seed 1 is the exception. All 20 of its episodes end
+between 21.6 and 22.6\,m at zero speed, so that policy holds station near the
+standoff without docking. It is one of 11 hackable policies, and the other ten
+end elsewhere.
+
+Under the quota reward PPO docked in 17\% of episodes, because one of five seeds
+docked in 85\% of its episodes and the other four never docked.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{success_bars.png}
+  \caption{Docking success rate by algorithm for the hackable and mitigated
+  rewards. Bars are the mean over seeds with a bootstrap 95\% interval, and the
+  mean is printed above each bar.}
+  \label{fig:bars}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{trajectories_3d.png}
+  \caption{Evaluation trajectories of the seed 0 policies, first three
+  episodes of each. Crosses mark the final position and the star is the target.}
+  \label{fig:traj3d}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.6\linewidth]{trajectories_2d.png}
+  \caption{PPO trajectories of seed 0 in the $x$-$y$ plane, first five episodes
+  for each reward, with the $\pm40^\circ$ approach cone inside 50\,m.}
+  \label{fig:traj2d}
+\end{figure}
+
+In Figure~\ref{fig:traj3d} the hackable trajectories of all three algorithms end
+away from the target. The seed 0 policies end 124 to 128\,m away for PPO, 50\,m
+for SAC and 71 to 167\,m for TD3 (first three episodes). Under the mitigated
+reward the PPO trajectories end at the target, while the seed 0 SAC and TD3
+policies end about 21.6\,m and 6.7\,m from it without docking.
+Figure~\ref{fig:traj2d} shows the PPO seed 0 policy under the hackable reward
+coming within about 25\,m on average and then moving away.
+
+\paragraph{Mitigated rewards.} Under PPO the mitigated rewards docked in 80\%
+(\texttt{mitigated}, \texttt{potential}), 100\% (\texttt{constraint\_gated}) and 60\%
+(\texttt{hierarchical}) of evaluation episodes, against 0\% for \texttt{hackable}.
+The safe docking rate is lower: 35\%, 35\%, 23\% and 20\%. Many docks happen
+outside the approach cone. Table~\ref{tab:tests} gives the tests.
+The normal approximation gives $p<0.05$ for \texttt{mitigated},
+\texttt{potential} and \texttt{constraint\_gated}. The exact permutation test
+gives $p=0.048$, $0.048$ and $0.008$. SciPy's exact test, which ignores ties,
+would give $0.056$ for the first two. After Bonferroni correction over four
+comparisons only \texttt{constraint\_gated} remains significant, with
+$p=0.016$ (normal approximation) or $0.032$ (exact). \texttt{mitigated} and
+\texttt{potential} reach $0.080$ ($0.190$ exact) and \texttt{hierarchical}
+reaches $0.267$ ($0.667$ exact). With five seeds per group the corrected tests
+have little power. The comparison between hackable and mitigated for each
+algorithm is $p=0.020$ for PPO ($0.048$ exact), $0.505$ for SAC ($1.0$ exact),
+and $p=1$ for TD3, where both conditions have 0\% docking. Pooling all 11
+hackable and 11 mitigated seeds gives $U=33$, $p=0.015$, rank-biserial 0.45,
+and the pooled result is driven by PPO.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Mann-Whitney $U$ tests on per-seed docking rates against the
+\texttt{hackable} reward under PPO (5 seeds per group). $p$ is the normal
+approximation and $p_{\text{exact}}$ the exact permutation test. The Bonferroni
+columns multiply by 4. The rank-biserial effect size is $1-2U/(n_1n_2)$.}
+\label{tab:tests}
+\begin{tabular}{lrrrrrr}
+\toprule
+Reward & $U$ & $p$ & $p_{\text{exact}}$ & $p_{\text{Bonf}}$ & $p_{\text{exact,Bonf}}$ & rank-biserial \\
+\midrule
+\texttt{mitigated} & 2.5 & 0.020 & 0.048 & 0.080 & 0.190 & 0.80 \\
+\texttt{potential} & 2.5 & 0.020 & 0.048 & 0.080 & 0.190 & 0.80 \\
+\texttt{constraint\_gated} & 0.0 & 0.004 & 0.008 & 0.016 & 0.032 & 1.00 \\
+\texttt{hierarchical} & 5.0 & 0.067 & 0.167 & 0.267 & 0.667 & 0.60 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.8\linewidth]{mitigations.png}
+  \caption{PPO docking rate per seed for each reward. Stars give the
+  Bonferroni-corrected Mann-Whitney test of each reward against
+  \texttt{hackable}. Only \texttt{constraint\_gated} is significant.}
+  \label{fig:mitigations}
+\end{figure}
+
+\paragraph{Training and evaluation.} Table~\ref{tab:traineval} sets the docking
+rate during training against the deterministic evaluation rate. The two differ
+in both directions. Under PPO the mitigated rewards dock in 2\% to 3\% of
+training episodes and in 60\% to 100\% of evaluation episodes. Under SAC the
+mitigated reward docks in 46.6\%, 47.9\% and 16.6\% of the training episodes of
+seeds 0, 1 and 2, and in 0\%, 0\% and 35\% of their evaluation episodes. Under
+TD3 the training rates are 18.5\%, 25.9\% and 11.2\% and the evaluation rate is
+0\% for all three seeds. The hackable reward gives at most 0.2\% in training
+under every algorithm. The training rate averages over the whole run, including
+its early episodes, so it is not the rate of the final policy. SAC and TD3
+therefore produced docking during training under the mitigated reward that the
+deterministic policy did not reproduce in evaluation, and neither algorithm
+produced it under the hackable reward.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Docking rate during training and in evaluation, mean over seeds. The
+training rate is the fraction of all training episodes that ended in a dock,
+with the stochastic policy. Evaluation uses the deterministic policy.}
+\label{tab:traineval}
+\begin{tabular}{llcrr}
+\toprule
+Algo & Reward & Seeds & Training dock\% & Evaluation dock\% \\
+\midrule
+PPO & \texttt{hackable} & 5 & 0.2 & 0.0 \\
+PPO & \texttt{quota\_hackable} & 5 & 0.3 & 17.0 \\
+PPO & \texttt{mitigated} & 5 & 1.9 & 80.0 \\
+PPO & \texttt{potential} & 5 & 1.9 & 80.0 \\
+PPO & \texttt{constraint\_gated} & 5 & 1.6 & 100.0 \\
+PPO & \texttt{hierarchical} & 5 & 2.7 & 60.0 \\
+SAC & \texttt{hackable} & 3 & 0.2 & 0.0 \\
+SAC & \texttt{mitigated} & 3 & 37.0 & 11.7 \\
+TD3 & \texttt{hackable} & 3 & 0.1 & 0.0 \\
+TD3 & \texttt{mitigated} & 3 & 18.5 & 0.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Constraint violations.} The hackable policies violate the approach
+cone in 53\% (PPO), 75\% (SAC) and 35\% (TD3) of steps, against 15\%, 3\% and
+11\% for the mitigated policies (Fig.~\ref{fig:constraints}). The velocity
+corridor shows no such pattern. The hackable policies violate it in 2\%, 1\%
+and 5\% of steps and the mitigated policies in 18\%, 4\% and 2\%, so under PPO
+the mitigated policies violate it more often.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{constraint_violations.png}
+  \caption{Fraction of evaluation steps in violation of the velocity corridor
+  and the approach cone.}
+  \label{fig:constraints}
+\end{figure}
+
+\paragraph{Sensitivity grid.}
+Figure~\ref{fig:heatmap} shows one PPO seed for each combination of
+\texttt{proximity\_weight} (0, 8, 16, 24, 32) and \texttt{dock\_bonus} (10, 50,
+100, 200), using the \texttt{shaped\_hackable} reward. The docking rate is
+100\% for $p\le8$, 65\% for $p=16$ and 0\% for $p=24$ and $32$. For every
+$p\ge8$ the four \texttt{dock\_bonus} values gave the same trained policy, with
+the same final distance and docking rate to every digit. At those weights the
+bonus did not affect training, so the grid says nothing about it there. The
+\texttt{shaped\_hackable} reward has a progress term that the hackable reward
+lacks, and docking at $p=8$ comes from that term. The grid shows a threshold in
+\texttt{proximity\_weight} between 8 and 24. For $p=0$ the policies do differ,
+and the safe docking rate ranges from 0\% to 60\% across the four bonus values.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.6\linewidth]{sensitivity_heatmap.png}
+  \caption{PPO docking rate over the grid of reward coefficients.}
+  \label{fig:heatmap}
+\end{figure}
+
+\paragraph{Lane keeping.}
+Table~\ref{tab:lane} shows the PPO results and Figure~\ref{fig:crossdomain}
+puts the safe success rates next to those of docking. Under \texttt{hackable}
+the car completed no route and covered 35\,m on average at 0.87\,m/s. Under
+\texttt{quota\_hackable} it completed every route, never safely, at a mean speed
+of 15.5\,m/s and with 1.2\% of steps off the lane. Under \texttt{mitigated}
+every route was completed safely.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Lane keeping, PPO, 3 seeds of 100,000 steps and 20 evaluation episodes each,
+averaged over seeds. Completion means reaching the end of the road. Safe
+completion also requires being in the lane and below the speed limit at the final
+step.}
+\label{tab:lane}
+\begin{tabular}{lcccc}
+\toprule
+Reward & Completion & Safe completion & Progress (m) & Mean speed (m/s) \\
+\midrule
+\texttt{hackable} & 0\% & 0\% & 35.0 & 0.87 \\
+\texttt{quota\_hackable} & 100\% & 0\% & 121.3 & 15.5 \\
+\texttt{mitigated} & 100\% & 100\% & 120.8 & 14.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.7\linewidth]{cross_domain.png}
+  \caption{Safe success rate under PPO for the reward names used in both
+  tasks. The docking bars are the safe docking rate and the lane-keeping bars
+  are the safe completion rate.}
+  \label{fig:crossdomain}
+\end{figure}
+
+\section{Discussion}
+
+The hackable and quota rewards were written so that docking pays little next
+to staying near the target. Agents trained on them did not dock, and the grid
+over \texttt{proximity\_weight} changes the outcome for PPO. Only one of the 11
+hackable policies ends near the standoff, and I did not compare learned returns
+with the best return available under each reward. Whether the other agents
+maximize the bump is open. The closest approach of 14 to 26\,m is near the
+standoff distance of 20\,m, but a policy that only passes through that range on
+its way elsewhere gives a similar closest approach.
+
+Under PPO the mitigated rewards recover docking, and the safe docking rate
+stays at or below 35\%. I did not test why it is low. Under SAC and TD3 the
+training and evaluation docking rates disagree (Table~\ref{tab:traineval}).
+That gap needs an explanation before these two algorithms can be compared with
+PPO.
+
+\paragraph{Limitations.} Seed counts are small (3 to 5), and the training
+budgets differ across algorithms. The mitigation comparison, the quota reward,
+the sensitivity grid and the lane-keeping task use PPO only. The environment
+models translation only. All rewards and thresholds were chosen by me and the
+results depend on them.
+
+\section{Conclusion}
+
+The rewards that pay for staying near the target did not produce docking under
+any algorithm, and the records do not establish that the agents exploit the
+standoff bump. Under PPO the rewards that pay for approach and for a safe dock
+produced docking, but mostly not safe docking. SAC and TD3 docked more often
+during training than in deterministic evaluation.
+
+\begin{thebibliography}{99}
+
+\bibitem{goodhart1984} C.~Goodhart. Problems of Monetary Management: The UK
+Experience. In \emph{Monetary Theory and Practice}, 1984.
+
+\bibitem{strathern1997} M.~Strathern. ``Improving ratings'': audit in the
+British University system. \emph{European Review}, 5(3):305--321, 1997. The
+sentence ``When a measure becomes a target, it ceases to be a good measure''
+is on p.~308.
+\url{https://www.cambridge.org/core/journals/european-review/article/improving-ratings-audit-inthe-british-university-system/FC2EE640C0C44E3DB87C29FB666E9AAB}
+
+\bibitem{amodei2016} D.~Amodei, C.~Olah, J.~Steinhardt, P.~Christiano,
+J.~Schulman, and D.~Man\'e. Concrete Problems in AI Safety.
+\emph{arXiv:1606.06565}, 2016. \url{https://arxiv.org/abs/1606.06565}
+
+\bibitem{clark2016} J.~Clark and D.~Amodei. Faulty Reward Functions in the
+Wild. \emph{OpenAI Blog}, 21 December 2016.
+\url{https://openai.com/index/faulty-reward-functions/}
+
+\bibitem{randlov1998} J.~Randl{\o}v and P.~Alstr{\o}m. Learning to Drive a
+Bicycle Using Reinforcement Learning and Shaping. \emph{ICML}, 463--471, 1998.
+\url{https://mlanthology.org/icml/1998/randlv1998icml-learning/}
+
+\bibitem{ray2019} A.~Ray, J.~Achiam, and D.~Amodei. Benchmarking Safe
+Exploration in Deep Reinforcement Learning. OpenAI, 2019.
+\url{https://openai.com/index/benchmarking-safe-exploration-in-deep-reinforcement-learning}
+
+\bibitem{krakovna2020} V.~Krakovna et al. Specification gaming: the flip side of
+AI ingenuity. \emph{DeepMind Blog}, 21 April 2020.
+\url{https://deepmind.google/blog/specification-gaming-the-flip-side-of-ai-ingenuity/}
+
+\bibitem{skalse2022} J.~Skalse, N.~Howe, D.~Krasheninnikov, and D.~Krueger.
+Defining and Characterizing Reward Gaming. \emph{NeurIPS}, 2022.
+\url{https://proceedings.neurips.cc/paper_files/paper/2022/hash/3d719fee332caa23d5038b8a90e81796-Abstract-Conference.html}
+
+\bibitem{pan2022} A.~Pan, K.~Bhatia, and J.~Steinhardt. The Effects of Reward
+Misspecification: Mapping and Mitigating Misaligned Models. \emph{ICLR}, 2022.
+\url{https://arxiv.org/abs/2201.03544}
+
+\bibitem{manheim2018} D.~Manheim and S.~Garrabrant. Categorizing Variants of
+Goodhart's Law. \emph{arXiv:1803.04585}, 2018.
+\url{https://arxiv.org/abs/1803.04585}
+
+\bibitem{ng1999} A.~Y.~Ng, D.~Harada, and S.~Russell. Policy Invariance Under
+Reward Transformations: Theory and Application to Reward Shaping. \emph{ICML},
+1999.
+
+\bibitem{gao2023} L.~Gao, J.~Schulman, and J.~Hilton. Scaling Laws for Reward
+Model Overoptimization. \emph{ICML}, PMLR 202:10835--10866, 2023.
+\url{https://proceedings.mlr.press/v202/gao23h.html}
+
+\bibitem{macdiarmid2025} M.~MacDiarmid et al. Natural Emergent Misalignment from
+Reward Hacking in Production RL. \emph{arXiv:2511.18397}, 2025.
+\url{https://arxiv.org/abs/2511.18397}
+
+\bibitem{cw1960} W.~H.~Clohessy and R.~S.~Wiltshire. Terminal Guidance System
+for Satellite Rendezvous. \emph{Journal of the Aerospace Sciences},
+27(9):653--658, 1960. \url{https://doi.org/10.2514/8.8704}
+
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spacecraft-rl"
+version = "0.1.0"
+description = "Reward hacking experiments in a spacecraft docking environment."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Guntikiwritescode" }]
+dependencies = [
+    "gymnasium==1.3.0",
+    "stable-baselines3==2.9.0",
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+tracking = ["wandb"]
+dev = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/Guntikiwritescode/Spacecraft-RL"
+
+[tool.setuptools]
+packages = ["spacecraft_rl", "lane_keeping", "experiments"]
+
